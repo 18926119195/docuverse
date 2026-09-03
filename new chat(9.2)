@@ -1,0 +1,396 @@
+# LLM processing and coordinates
+
+## User
+
+我想要梳理清楚，如果我这个比现码（不要看md）更好，就以现在的架构为准。第一：内禀性坐标其实是一个时空坐标，某本书某页就是空间性的，某个职能负责者的某个步骤就是时间性的。举例：bookkey的坐标是如何来的呢？layout对这本书的某页进行切割，分成k个步骤，此时内禀性坐标就是（book（哪本），page（哪页），layout（哪步）），然后layout会给ocr具体的bbox，然后ocr就对具体的某步进行了ocr扫描从而真正地形成了a1表上的bookkey的坐标即（book，page，layout（某步），ocr（某步）），以此类推，后面的peek的llm，其实也就是多了增量信息而已，也就是（book，page，layout（某步），ocr（某步）,peek(某步）），但是我有一个疑惑如果dicide的llm一次的llm处理生成多个一一对应的briefkey和prospect，请问这些所谓的prosepctkey到底如何摆脱就是它们会因为经过了同一个步骤而共享了同一个内禀性坐标从而导致一对多的情况呢？      第二，其实有这么几种llm：peek【输入：bookkey及其展开的原文，输出：brief和bookkey】；decide【输入：briefkey及其展开brief，输出：prospect（即这些brief解决q（现在）的各种可能，并且和其分析的brief是一一对应的，但是并不意味着一个prosepct只有一个可能，可能是多个的)];infer【输入：bookkey及其展开的原文t，输出：infer（即这些t是如何解决用户现在的q的，必须与bookkey的组合是一一对应的，但是并不影响infer是多个步骤的，也不影响就是单个bookkey如果能够解决用户当前的问题，也应该作为infer之一，也不排除2个及其以上的bookkey相互作用来解决用户现在的问题】reuse[输入：pathkey及其展开为infer和prospect，输出：复用的理由（path如何解决用户当前的问题）以及pathkey】这里需要注意的是pathkey是如何来的呢？一般是用户对照inferkey和prospectkey的两者的展开，然后在匹配之后（也就是说哪个prosepct的预测是能够被推理所证实或者所完成的，然后就是匹配了），然后用户就是在两者之间进行类似强调笔的那种匹配关联，如果用户没有做这个的话，那么就是相当于默认了存在一个监督llm然后自发地进行输出一个path，最后落账为pathkey并且挂在被匹配的对象inferkey和prospectkey之间。；query：【输入：querykey（历史）及其展开的原文q，输出：neighbour（也就是说这些历史q和现在q的相关性的程度）和querykey】           说到这里：其实你或许会察觉到就是每一个llm实质上都是输入和输出都有一个对称性的特定类型的key，例如peek就是bookkey都出现在输入和输出，decide就是briefkey，但是需要注意的是作为输出的永远只是输入的子集而已，也就是意味着输出的那个同类型的key其实是被这个llm选中的。 另外，就是除了对称性同类型key之外，剩余的就是关于这个key的展开以及另外一个即增量信息，例如peek的增量信息就是brief，dicide的就是prosepct，reuse就是复用的理由，以此类推，增量信息最后会被写信台或者网关进行落账出一个增量坐标（前面我们提到的内禀性坐标是如何构成的）从而挂账在和它以此被输出的那个特定类型的key上。另外，只有peek的q不是用户现在的q（而是一个特定的指令，例如就是关于严谨地从中提炼出brief提供后面的llm阅读，所以必须只能够是名词或者专有名词或者是动词，不能够是一个完整地陈述句子），其余所有的llm都是被q（现在）贯穿始终的。所以也就是说明了一个query其实贯穿了或者是串起了这一轮reuse或者是infer已经完成了的所有的不同类型key，而且是独一无二地串联起来的，从而方便哈希。               现在，我开始梳理就是用户输入了一句话，首先需要通过意图llm去识别到底是指令还是问题，如果是前者的话，通常就是要么是调取某个内容显示出来，要么就是单独重新启动某个特定的llm。后者就是这么一个过程：如果没有历史query的话，就是peek、decide、infer。如果是有历史querykey的话，那么就是先走queryllm，产出一个neighbour，然后这个neighbour根据前面提到的规则就是落账在其对应的querykey上的，从而索引找到对应的query线，从而进行reuse，然后reuse有两种可能也就是复用了，就是落账了一个reusekey，然后这个reusekey连接了其对应的pathkey和用户现在的querkey。如果不能够复用，那就是走一轮decide（但是这里的briefkey是写信台排除了刚刚pathkey所能够回溯的prospectkey以及inferkey，从而回溯到其对应的briefkey和bookkey，从而排除这些briefkey，取挂在这个bookkey上余下的所有briefkey以及除了这些bookkey之外其他bookkey上挂载的briefkey，最后自己判断是否够用，不够再peek之类的，反正peek其实为了解决标签不够用，所以要breif的事情。最后进入infer等等后面的那些事情。
+
+## Assistant
+
+先对照现码把内禀坐标、各 LLM 的 key 对称性和 prospect 一对多问题梳清楚；我不看 md，只读实现。
+
+### Tool New agent
+
+## Assistant
+
+现码里没有 `prospectkey`，我先把 decide / brief / infer 的落账实现读准，再对照你的内禀坐标一对多疑惑作答。
+
+### Tool Read File V2
+
+```
+{"path":"C:\\Users\\Administrator\\Desktop\\docuverse-master\\docuverse-master\\src\\reasoning\\letterDeskContracts.ts","limit":120}
+```
+
+### Tool Ripgrep Raw Search
+
+```
+{"pattern":"keep|prospect|coverage|lastBriefKey|seedRange","path":"C:\\Users\\Administrator\\Desktop\\docuverse-master\\docuverse-master\\src\\reasoning","glob":"*.{ts,tsx}","caseInsensitive":false,"headLimit":60,"multiline":false,"toolCallId":"call-c6462648-54ec-4918-bb71-121371afb846-2\nfc_416fd3cb-2f23-9b4a-847a-2881e91c31b8_1","offset":0}
+```
+
+### Tool Read File V2
+
+```
+{"path":"C:\\Users\\Administrator\\Desktop\\docuverse-master\\docuverse-master\\src\\reasoning\\types.ts","offset":49,"limit":80}
+```
+
+### Tool Read File V2
+
+```
+{"path":"C:\\Users\\Administrator\\Desktop\\docuverse-master\\docuverse-master\\src\\reasoning\\inferPath.ts","limit":100}
+```
+
+### Tool Read File V2
+
+```
+{"path":"C:\\Users\\Administrator\\Desktop\\docuverse-master\\docuverse-master\\src\\reasoning\\keyDecisionState.ts","limit":50}
+```
+
+### Tool Ripgrep Raw Search
+
+```
+{"pattern":"adoptReusePath|QueryReuseLink|canSolve|judgments","path":"C:\\Users\\Administrator\\Desktop\\docuverse-master\\docuverse-master\\src\\reasoning","glob":"*.{ts,tsx}","caseInsensitive":false,"headLimit":40,"multiline":false,"toolCallId":"call-7b44bc05-ba97-4cba-b655-36494e0a54df-6\nfc_f13d0af8-587c-9fca-8fbd-92e339b48d76_1","offset":0}
+```
+
+## Assistant
+
+你的框架比现码更干净；下面以你的架构为准。现码里 **没有 `prospectkey`**，decide 只是 `keep[{briefKey, rationale}]` 过滤器——这正是你疑惑的源头。
+
+---
+
+## 1. 内禀坐标 ≠「同一次 LLM 调用」
+
+你把 layout/ocr/peek 当成时间步叠在空间门牌上，这是对的：
+
+```
+book → page → layout(k) → ocr(k) → peek(k) → … → bookKey / briefKey 挂账
+```
+
+**关键纠正：decide 那一次调用，不是 layout/ocr 那种「切步」坐标。**
+
+- layout/ocr 的 `k`：对**同一空间**再切一刀，所以坐标要带 `k`。
+- decide：对**已经各自独立的 briefKey 集合**做筛选/预测，不是再切一刀。
+
+所以一对多不会发生在「共享同一个 decide 步骤坐标」上。正确挂账是：
+
+| 层 | 身份怎么来 | 挂在谁上 |
+|---|---|---|
+| bookKey | 时空门牌 `(doc, page, slotK[, …])` 封印 | A1 原子 |
+| briefKey | brief 正文哈希（现码 `bh_…`） | 挂在 bookKey 门上 |
+| **prospectKey** | **与该 brief 一一对应的预测正文**（或 `hash(briefKey + prospect)`） | **挂在 briefKey 上** |
+| inferKey | rationale 哈希 | 挂在 bookKey 组合 / 步上 |
+| pathKey | infer×prospect 匹配后落账 | 挂在被匹配的 inferKey 与 prospectKey 之间 |
+| queryKey | 当前 Q 哈希 | 串起本轮所有被选中的 key |
+
+**decide 一次吐出 N 个 prospect，并不共享一个内禀坐标**——各自的身份来自「对应的那个 briefKey + 自己的增量正文」，不是来自「第几次 decide」。
+
+类比：OCR 一页切出 k 个 slot，每个 slot 有自己的 `slotK`；decide 一次选出 N 个 brief，每个 prospect 有自己的 prospectKey。**调用次数是批处理，不是坐标轴。**
+
+现码缺口：把你说的 prospect 压成了 `keep[].rationale`，没有独立 key，所以看起来像「同一步共享坐标」。按你的架构，写信台应对每个 keep 铸 `prospectKey` 并挂到对应 `briefKey`。
+
+---
+
+## 2. LLM 对称性（以你的为准）
+
+共性：**同型 key 出入对称，输出 ⊆ 输入（被选中的子集）；另附增量；增量由台落成增量坐标挂在该输出 key 上。**
+
+| LLM | 输入 | 输出（对称子集） | 增量 |
+|---|---|---|---|
+| peek | bookKey + T | 被选中的 bookKey | brief → 铸 briefKey 挂门上 |
+| decide | briefKey + brief | 被选中的 briefKey | prospect → 铸 prospectKey 挂 briefKey |
+| infer | bookKey + T | 参与解题的 bookKey 组合 | infer（可多步；可单门/多门互撑）→ 铸 inferKey |
+| reuse | pathKey + 展开(infer∥prospect) | 被复用的 pathKey | 复用理由 → 可铸 reuse 边 |
+| query | 历史 queryKey + 旧 Q | 有邻域的 queryKey | neighbour（相关度）挂在对应 queryKey |
+
+- 只有 peek 的指令 q 不是用户现在的 Q（抽名词/专名/动词级 brief）。
+- 其余全程被 **Q_now** 贯穿；本轮 **queryKey** 唯一串起所有被选中的异型 key，便于哈希索引。
+
+现码接近但更扁：decide 无 prospectKey；reuse 是 mainInfer 前闸，落的是 `QueryReuseLink(qk_now→旧 qk)`，不是 pathKey 一等公民；query 产出有序 `queryKey[]`，neighbour 在现码里更多是图上 1-hop 焦点，不是独立落账字段。
+
+---
+
+## 3. pathKey 怎么来
+
+1. 用户（或监督 LLM）对照 **infer 展开** 与 **prospect 展开**。
+2. 某 prospect 的预测被某 infer 证实/完成 → 高亮匹配。
+3. 落账 **pathKey**，边挂在该 inferKey 与 prospectKey 之间。
+4. 无人手匹配 → 默认监督 LLM 自发产出 path，同样落账。
+
+现码没有这步：path = mainInfer 的 `paths[].steps`，每步铸 inferKey；reuse 是审「旧 inferKey 能否解 Q_now」，不是 infer×prospect 匹配。
+
+---
+
+## 4. 用户一句话 → 流程（你的为准）
+
+```
+意图 LLM：指令 | 问题
+├─ 指令 → 调显 / 单启某 LLM
+└─ 问题
+   ├─ 无历史 query → peek → decide → infer（→ 匹配 path）
+   └─ 有历史 queryKey
+        → queryLLM → neighbour 挂对应 queryKey → 索引到旧 query 线
+        → reuse(path)
+             ├─ 能复用 → 落 reuse 边：pathKey ↔ Q_now 的 queryKey
+             └─ 不能 → decide（写信台先剔除该 path 能回溯到的
+                  prospect/infer → brief/book，再用剩余 brief；
+                  不够再 peek 补标签）→ infer → …
+```
+
+---
+
+## 5. 对你那个疑惑的一句话结论
+
+**prospect 不继承「同一次 decide」为内禀坐标；一对一绑的是 briefKey。**  
+一次 decide 批处理 N 对，只是调度；每条 prospect 的坐标/身份由「被选中的 briefKey + 自身增量」独立铸出，因此不会因为同批而塌成一对多共享坐标。
+
+若下一步要把现码对齐这套标准，优先补：**prospectKey 铸造与挂账**，以及 **pathKey = infer×prospect 匹配边**（reuse 挂在 path 上，而不是只挂 qk↔qk）。需要的话我可以直接改契约与落账。
+
+## User
+
+但是我想到的是就是如果我还是坚持以动作（具体的某个步骤来锁定这个独一无二地内容）而不是以哈西内容来确保的话，有其他的方案吗？
+
+## Assistant
+
+动作锁定身份在现码里已有雏形（`actionId`）；我对照一下它怎么用，再给你可落地的非哈希方案。
+
+### Tool Ripgrep Raw Search
+
+```
+{"pattern":"actionId|ActionRecord|mint.*key|sealLock","path":"C:\\Users\\Administrator\\Desktop\\docuverse-master\\docuverse-master\\src\\reasoning","glob":"*.{ts,tsx}","caseInsensitive":false,"headLimit":35,"multiline":false,"toolCallId":"call-c46f63c1-9df0-4528-ae47-62cd667a9d5f-7\nfc_f39c0653-50f2-962a-8269-6fd5730fcd32_0","offset":0}
+```
+
+### Tool Read File V2
+
+```
+{"path":"C:\\Users\\Administrator\\Desktop\\docuverse-master\\docuverse-master\\src\\reasoning\\types.ts","offset":111,"limit":80}
+```
+
+## Assistant
+
+有。坚持「用动作/步骤锁定身份、不用内容哈希当主键」，完全可行；关键是：**不要把一次 LLM 批调用当成唯一坐标点**。
+
+一次 decide 吐出 N 条，共享的是「批作业」；真正锁内容的是 **批内每一条落账动作**。
+
+---
+
+### 方案 A：批内序位（最直接）
+
+```
+instanceKey = (actionId, outIndex)
+```
+
+例：`decide#a7f3#3` → 第 3 条 keep/prospect。
+
+- 同一次调用 → 同一个 `actionId`
+- 不同输出 → 不同 `outIndex`
+- 一对一：`outIndex` 绑到对应的 `briefKey`（父键），不是绑到「整个 decide」
+
+这和 OCR 的 `slotK` 同构：`page` 共享，`k` 区分。
+
+---
+
+### 方案 B：写信台微动作（更贴你的「步骤」直觉）
+
+LLM 批调用只算草稿；**真正铸键的是台对每一对的落账**：
+
+```
+prospectInstance = mint( settleActionId_i )
+settle_i : briefKey_j ← prospect正文
+```
+
+N 条 = N 次 settle，各有自己的 `actionId`。  
+「独一无二」锁的是 **落账步骤**，不是模型吐字那一下。
+
+---
+
+### 方案 C：谱系坐标（时空 + 职能步）
+
+```
+(queryKey, job, actionId, parentKey, ordinal)
+```
+
+例 prospect：
+
+```
+(qk_now, decide, act_…, briefKey_x, 0)
+```
+
+- 空间性：仍可由 parent 回溯到 book/page/slot
+- 时间性：`queryKey × job × actionId × ordinal`
+- 不靠正文哈希也能全局唯一
+
+---
+
+### 方案 D：双轨（推荐，若还要复用）
+
+| 轨 | 作用 |
+|---|---|
+| **实例键**（动作锁） | 主键、挂账、审计、本轮串联 |
+| **内容指纹**（可选别名） | 仅用于「像不像以前」检索，不当门牌 |
+
+同一句话 peek 两次 → 两个实例键；指纹可提示「内容相同」，是否合并由 reuse/用户决定。
+
+---
+
+### 和「哈希主键」的取舍
+
+- **动作锁**：同文不同步 = 不同身份（谱系清晰；自动去重变弱）
+- **内容哈希**：同文 = 同键（易复用；丢「是哪一次说的」）
+
+你要的是前者；一对多的解法不是放弃动作锁，而是 **把坐标粒度下沉到「单条输出 / 单次 settle」**，与 layout 的 `k` 同一逻辑。
+
+若只选一个落地：用 **A（actionId + outIndex）做实例键，内容哈希只做副索引**——和现有 `ActionRecord.actionId` 最顺。
+
+## User
+
+```chat_selection
+agent_id: 20490f7c-0779-4143-bf4d-2d2effb6f47d
+selected_text:
+方案 B：写信台微动作（更贴你的「步骤」直觉）
+LLM 批调用只算草稿；真正铸键的是台对每一对的落账：
+
+prospectInstance = mint( settleActionId_i )
+settle_i : briefKey_j ← prospect正文
+N 条 = N 次 settle，各有自己的 actionId。
+「独一无二」锁的是 落账步骤，不是模型吐字那一下。
+```
+ 这个似乎是更好的，对比这种和内容哈希的不同，尤其是哪个更加有利于配合意图llm导航判断目前的任务缺少哪些增量信息需要找哪些键然后发指令写信台去调取key，然后这个key就会被某个llm完成
+
+## Assistant
+
+对意图导航来说，**方案 B（落账微动作）明显更合适**；内容哈希更适合当「像不像」的副信号，不当门牌。
+
+---
+
+### 意图 LLM 真正在干什么
+
+它要判断的不是「这句话内容唯一吗」，而是：
+
+1. **当前 Q 线缺哪一类增量**（brief / prospect / infer / path / neighbour…）
+2. **缺在哪扇已有门上**（哪个 bookKey / briefKey / …）
+3. **发指令：写信台调取哪些 key → 交给哪个 LLM 补完**
+
+这是**图上的空位导航**，不是正文去重。
+
+---
+
+### 两种身份分别服务什么
+
+| | 落账微动作（B） | 内容哈希 |
+|---|---|---|
+| 键回答的问题 | 「是哪一次写入钉上的」 | 「正文是否相同」 |
+| 地址性 | 强：可指「这扇门、这次 settle」 | 弱：同文跨轮会撞成同一键 |
+| 缺什么 | 直接可读：`briefKey` 上有无 prospect 的 settle | 只能猜「有没有出现过相似正文」 |
+| 和 Q_now 串联 | 自然：settle 发生在本轮 query 因果里 | 易串台：旧轮同文 brief 被当成「已有」 |
+| 发指令 | 「调 `briefKey_j` → decide」指得准 | 「调 `bh_xxx`」可能指到别轮实例 |
+| 复用/去重 | 弱（要另做） | 强 |
+
+意图要的是左列；哈希擅长右列。
+
+---
+
+### 为何 B 更贴「缺增量 → 找键 → 发指令」
+
+在 B 下，台账是一棵**类型化挂账树**：
+
+```
+queryKey
+  └─ bookKey ──settle(peek)──► briefKey
+                    └─ settle(decide)──► prospectKey ?
+  └─ bookKey… ──settle(infer)──► inferKey
+  └─ path? = match(infer, prospect)
+```
+
+意图只需看**边有没有落成**：
+
+- 有 book、无 brief settle → 指令 peek，调那些 bookKey  
+- 有 brief、无 prospect settle → 指令 decide，调那些 briefKey  
+- 有 infer∥prospect、无 path settle → 指令匹配/监督，调这两端  
+- 有历史 query、无 neighbour → 指令 queryLLM  
+- 有 path、审是否够解 Q → 指令 reuse  
+
+每条指令的宾语都是**实例键**（某次落账钉出来的），LLM 做完后再 **settle 一次** 补上缺失边——导航闭环干净。
+
+若用内容哈希当主键：
+
+- 「缺 prospect」可能被「库里某处有一段像的 rationale」误判为已有  
+- 同文两次 peek 合成一个 briefKey，意图无法说「挂在**本轮**这扇门上的那份」  
+- 调 key 时指的是正文桶，不是「当前任务空位上的那一钉」
+
+---
+
+### 怎么配合用（不必二选一）
+
+- **主键 / 导航 / 发指令**：一律方案 B 的 settle 实例键  
+- **副索引**：正文指纹只回答「以前有没有说过类似的」→ 给 reuse/意图作提示，**不**当作可调取的门牌  
+
+一句话：**意图导航要的是「任务图上空位的地址」，落账步骤给的就是地址；内容哈希给的是「这句话长什么样」。** 缺增量、找键、发指令，跟地址走。
+
+## User
+
+```chat_selection
+agent_id: 20490f7c-0779-4143-bf4d-2d2effb6f47d
+selected_text:
+副索引：正文指纹只回答「以前有没有说过类似的」→ 给 reuse/意图作提示，不当作可调取的门牌
+```
+ 但是我记得你这个是基于现在的代码或者以前的代码的reuse来判断的吧，我这个架构的reuse根本不是这样的吧？
+
+## Assistant
+
+你说得对——那句把正文指纹塞给 reuse，是在用**现码**的「审旧 infer / 内容像不像」在说话，**不是你的 reuse**。
+
+按你的架构，reuse 是：
+
+- **输入**：`pathKey` + 展开（infer ∥ prospect）
+- **输出**：复用理由 + 被选中的 `pathKey`（子集）
+- **怎么找到候选**：历史 `queryKey` → queryLLM 的 neighbour → 旧 query 线上已有的 path，不是「正文撞哈希」
+
+所以 reuse 判断的是：**这条已经匹配好的 path，能否解决 Q_now**；门牌是 path / infer / prospect 的落账实例，跟内容指纹无关。
+
+正文指纹若还要留，在你这套里最多是别处的可选提示（例如「库里是否出现过类似 brief 文案」），**不参与 reuse 导航，也不当可调取门牌**。reuse 的副信号若需要，也应是 neighbour / 旧 path 谱系，而不是指纹。
+
+先前那句以现码 reuse 为准，按你的架构作废。
+
+## User
+
+OK，请你按照就是现在的架构以及我们达到的共识去严谨地修改现码，然后告诉我你干了啥，然后把矛盾的或者需要我确定的告诉我
+
+## Assistant
+
+按共识改现码：先摸清落账、契约与 autoFlow，再按方案 B 补 prospect/path 并收紧 reuse。
+
+### Tool Todo Write
+
+### Tool Glob File Search
+
+```
+{"targetDirectory":"C:\\Users\\Administrator\\Desktop\\docuverse-master","globPattern":"**/src/reasoning/*.{ts,tsx}"}
+```
+
+### Tool Ripgrep Raw Search
+
+```
+{"pattern":"briefContentHash|inferKeyOf|queryKeyOf|adoptReusePath|rollDoorBrief|settleInfer|DeskJob|ContractKeyKind","path":"C:\\Users\\Administrator\\Desktop\\docuverse-master\\docuverse-master\\src\\reasoning","glob":"*.{ts,tsx}","outputMode":"content","caseInsensitive":false,"headLimit":80,"multiline":false,"toolCallId":"call-b21f0ce2-fd83-4d11-96b0-143a1f5ab44f-11\nfc_7056542f-30bb-935b-80c3-83485446a9e4_2","offset":0}
+```
+
+### Tool Read File V2
+
+```
+{"path":"C:\\Users\\Administrator\\Desktop\\docuverse-master\\docuverse-master\\src\\reasoning\\attentionIoStore.ts","limit":350}
+```
+
+### Tool Read File V2
+
+```
+{"path":"C:\\Users\\Administrator\\Desktop\\docuverse-master\\docuverse-master\\src\\reasoning\\autoFlow.ts","limit":200}
+```
+
+### Tool Read File V2
+
+```
+{"path":"C:\\Users\\Administrator\\Desktop\\docuverse-master\\docuverse-master\\src\\reasoning\\keyDecisionState.ts"}
+```
+
+### Tool Read File V2
+
+```
+{"path":"C:\\Users\\Administrator\\Desktop\\docuverse-master\\docuverse-master\\src\\reasoning\\deskDelivery.ts","limit":120}
+```
