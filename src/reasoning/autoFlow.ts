@@ -327,6 +327,17 @@ export async function runAutoFlow(input: {
     bookText?: string
     bondId: string
   }>
+  /**
+   * 监督预测轨续跑：禁止采纳这些坏 path。
+   * 其它 neighbour 线上 path 仍可 reuse（禁死路 ≠ 禁一切历史）。
+   */
+  excludePathKeys?: string[]
+  /** @deprecated 用 excludePathKeys；true 时等价于不跑 reuse（过刚，仅兼容） */
+  skipReuse?: boolean
+  /** 写入 decide 窗的监督尸检策略（预测轨） */
+  decideCritiqueHint?: string
+  /** 进入 decide 前剔除的死路 brief */
+  excludeBriefKeys?: string[]
 }): Promise<{ ok: boolean; answer: string; note: string }> {
   const q = input.question.trim()
   if (!q) {
@@ -338,6 +349,11 @@ export async function runAutoFlow(input: {
   const docId = input.bookIndex.docId
   // 本轮唯一 queryKey（方案 B settle）；贯穿 decide/prospect/infer/path/reuse
   const turnQueryKey = useAttentionIo.getState().ensureQueryKey(q)
+  if (input.skipReuse) notes.push('skipReuse')
+  if (input.excludePathKeys?.length) {
+    notes.push(`excludePath×${input.excludePathKeys.length}`)
+  }
+  if (input.decideCritiqueHint?.trim()) notes.push('decideCritiqueHint')
 
   // 自动流入口 = 第一步（composer 纯问，未引入 LLM I/O）
   const branch = resolveFirstStepBranch(docId)
@@ -442,13 +458,18 @@ export async function runAutoFlow(input: {
     }
 
     // 有历史：先 path 复用（neighbour→path）；能则停；不能则剔除再 decide
-    {
+    // 监督同问：excludePathKeys 禁坏 path；换问 revise_q 不传 skipReuse，正常 reuse
+    if (input.skipReuse) {
+      notes.push('复用跳过·兼容 skipReuse')
+      parts.push('### 自动流 · 跳过 reuse（兼容）')
+    } else {
       input.onProgress?.('自动流 · 先 reuse（neighbour→path）…')
       const { runReuseGate } = await import('./letterDeskDispatch')
       const gate = await runReuseGate({
         qNow: q,
         docId,
         queryKey: turnQueryKey,
+        excludePathKeys: input.excludePathKeys,
         onProgress: input.onProgress,
       })
       notes.push(gate.note)
@@ -503,6 +524,24 @@ export async function runAutoFlow(input: {
       ok: false,
       answer: parts.join('\n\n'),
       note: `自动流中止 · 无 brief 可 decide · ${notes.join(' → ')}`,
+    }
+  }
+
+  // 监督预测轨：先剔死路 brief（在 attach 之前）
+  if (input.excludeBriefKeys && input.excludeBriefKeys.length > 0) {
+    const drop = new Set(input.excludeBriefKeys)
+    const before = sealedBriefKeys.length
+    sealedBriefKeys = sealedBriefKeys.filter((b) => !drop.has(b))
+    notes.push(`监督剔 brief×${drop.size} · ${before}→${sealedBriefKeys.length}`)
+    parts.push(
+      `### 自动流 · 监督剔除死路 brief\n剔×${drop.size} · 余 ${sealedBriefKeys.length}`,
+    )
+    if (sealedBriefKeys.length === 0) {
+      return {
+        ok: false,
+        answer: parts.join('\n\n'),
+        note: `自动流中止 · 监督剔除后无 brief · ${notes.join(' → ')}`,
+      }
     }
   }
 
@@ -673,6 +712,7 @@ export async function runAutoFlow(input: {
       versionIndex: 0,
       createdAt: Date.now(),
       onlyBriefKeys: decideScope,
+      decideCritiqueHint: input.decideCritiqueHint,
     }
     const decideRes = await askDeepSeekWithLetterDesk({
       question: q,

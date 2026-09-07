@@ -219,6 +219,11 @@ export interface LetterDeskPackage {
   onlyBriefKeys?: string[]
   /** 监督预测轨：decide 窗内的策略尸检提示（迭代策略，非直接 seedRange） */
   decideCritiqueHint?: string
+  /**
+   * reframe 硬闸：这些坏 prospect 正文的「像不像」样本；
+   * 新铸 prospect 若同构则拒落账（可触发一次重 decide）。
+   */
+  avoidProspectTexts?: string[]
 }
 
 /** 意图路由沿革 · 台侧记录（≠ 注意力窗 I/O） */

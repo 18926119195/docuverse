@@ -400,6 +400,10 @@ export type {
 } from './superviseCritique'
 export { executeSuperviseCritique } from './superviseCritiqueExec'
 export {
+  prospectIsomorphicToAny,
+  filterKeepsAvoidingBadProspects,
+} from './prospectIsomorph'
+export {
   inspectQueryGap,
   gapToDeskPackages,
   formatGapLedgerForIntent,

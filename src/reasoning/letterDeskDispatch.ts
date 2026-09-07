@@ -50,6 +50,8 @@ export interface ThinSeed {
   onlyBriefKeys?: string[]
   /** 监督预测轨 → decide 策略提示 */
   decideCritiqueHint?: string
+  /** reframe：拒铸与这些坏 prospect 正文同构的输出 */
+  avoidProspectTexts?: string[]
 }
 
 export interface ExpandedKey {
@@ -617,6 +619,8 @@ export async function runReuseGate(input: {
   /** @deprecated 架构以 neighbour→path 为准；保留兼容 */
   bookKeys?: string[]
   queryKey?: string
+  /** 监督同问复盘：禁止采纳这些坏 path（其它 neighbour path 仍可） */
+  excludePathKeys?: string[]
   onProgress?: (msg: string) => void
 }): Promise<{
   adopted: boolean
@@ -634,14 +638,21 @@ export async function runReuseGate(input: {
   raw: string
   note: string
 }> {
-  const paths = listCandidatePathsViaNeighbours(input.queryKey)
+  const banned = new Set(
+    (input.excludePathKeys ?? []).map((k) => k.trim()).filter(Boolean),
+  )
+  const paths = listCandidatePathsViaNeighbours(input.queryKey).filter(
+    (p) => !banned.has(p.pathKey),
+  )
   if (paths.length === 0) {
     return {
       adopted: false,
       judgments: [],
       excludeBriefKeys: [],
       raw: '',
-      note: '复用闸：无 neighbour→path 候选（须先 queryLLM 落 neighbour）',
+      note: banned.size
+        ? `复用闸：候选均被监督排除坏 path×${banned.size}（或无 neighbour→path）`
+        : '复用闸：无 neighbour→path 候选（须先 queryLLM 落 neighbour）',
     }
   }
 
@@ -1073,6 +1084,7 @@ export async function dispatchLetterDesk(input: {
         versionIndex: pkg.versionIndex,
         onlyBriefKeys: pkg.onlyBriefKeys,
         decideCritiqueHint: pkg.decideCritiqueHint,
+        avoidProspectTexts: pkg.avoidProspectTexts,
       },
     ]
     const { keys, note: expNote } = expandSeedsForJob({
@@ -1224,22 +1236,81 @@ export async function dispatchLetterDesk(input: {
       // 一槽一 key：写信台路径也必须 settle，禁止只吐文本不落账
       if (pkg.job === 'decide') {
         const { parseDecideOutcome } = await import('./autoFlow')
+        const { filterKeepsAvoidingBadProspects } = await import(
+          './prospectIsomorph'
+        )
         const decideOut = parseDecideOutcome(chat.content)
         const allowed = keys
           .filter((k) => k.kind === 'briefKey')
           .map((k) => k.key)
+        const avoid = pkg.avoidProspectTexts ?? []
+        let keeps = decideOut.keeps
+        let isoRejected: Array<{ briefKey: string; reason: string }> = []
+        let rawForLog = chat.content
+        if (avoid.length > 0) {
+          const filtered = filterKeepsAvoidingBadProspects(keeps, avoid)
+          keeps = filtered.kept
+          isoRejected = filtered.rejected
+          // 全部同构 → 加强提示再 decide 一次
+          if (
+            keeps.length === 0 &&
+            isoRejected.length > 0 &&
+            !pkg.edgeId.includes('_iso_retry')
+          ) {
+            input.onProgress?.(
+              '写信台 · reframe 同构拒铸 → 加强尸检再 decide…',
+            )
+            const retryHint =
+              (pkg.decideCritiqueHint || '') +
+              '\n【硬闸重试】上一轮 prospect 与坏框同构已被拒铸。必须给出明显不同的解题可能；禁止复述旧 prospect。'
+            const retryWin = assembleWindow({
+              docId: input.docId,
+              bookIndex: input.bookIndex,
+              job: 'decide',
+              qNow: pkg.question,
+              seeds,
+              keys,
+              decideCritiqueHint: retryHint,
+            })
+            const retryChat = await flashChat({
+              system: retryWin.systemPayload,
+              user: retryWin.userPayload,
+              temperature: 0.2,
+            })
+            if (retryChat.ok) {
+              const retryOut = parseDecideOutcome(retryChat.content)
+              const again = filterKeepsAvoidingBadProspects(
+                retryOut.keeps,
+                avoid,
+              )
+              keeps = again.kept
+              isoRejected = [...isoRejected, ...again.rejected]
+              rawForLog = retryChat.content
+              parts.push(
+                `### decide · 同构重试\n保留 ${keeps.length} · 仍拒 ${again.rejected.length}\n--- raw ---\n${retryChat.content.trim()}`,
+              )
+            }
+          }
+        }
         const settled = useAttentionIo.getState().settleProspects({
           question: pkg.question,
           queryKey: turnQueryKey,
-          keeps: decideOut.keeps,
+          keeps,
           allowedBriefKeys: allowed,
         })
         notes.push(
           `prospect×${settled.prospectKeys.length}` +
-            (settled.rejected.length ? ` · 拒${settled.rejected.length}` : ''),
+            (settled.rejected.length || isoRejected.length
+              ? ` · 拒${settled.rejected.length + isoRejected.length}`
+              : '') +
+            (isoRejected.length ? ` · 同构${isoRejected.length}` : ''),
         )
         parts.push(
-          `### decide · 落账\nprospectKeys: ${settled.prospectKeys.map((k) => `\`${k}\``).join(', ') || '∅'}\n--- raw ---\n${chat.content.trim()}`,
+          `### decide · 落账\nprospectKeys: ${settled.prospectKeys.map((k) => `\`${k}\``).join(', ') || '∅'}` +
+            (isoRejected.length
+              ? `\n同构拒：${isoRejected.map((r) => `${r.briefKey}(${r.reason})`).join('; ')}`
+              : '') +
+            `\n--- raw ---\n${rawForLog.trim()}`,
         )
       } else if (pkg.job === 'query') {
         const rows = parseQueryNeighbours(chat.content)

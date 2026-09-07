@@ -1,9 +1,11 @@
 /**
  * 监督归因（两轨）：
- * - predict：材料/prospect；尸检旧 ι → 迭代 decide 策略（其后才可能 seedRange/peek）
- * - reason_narrow：材料∩大方向仍成立；必带排除坏 ι → infer（可深化），不过 decide
+ * - predict：材料/prospect/问法立错；旧 ι 作尸检
+ *   · 同问：reframe / need_peek / drop_briefs —— 禁采纳本轮坏 path，其它历史 path 仍可 reuse
+ *   · 换问：revise_q —— 新 qk 走标准流（含 reuse）；≠ 狭义 deepen
+ * - reason_narrow：材料∩大方向仍成立；必排坏 ι → infer（same_q | deepen），不过 decide
  *
- * 与 path 配对监督（matches）分工：配对结 path；本模块管不满后的归因调度。
+ * path / matches 与上一轮 query→neighbour I/O：归因的主要参考指标，不是第三条监督轨。
  */
 
 import { extractJsonObject } from './inferPath'
@@ -19,26 +21,23 @@ import { ingestKeyIncrementStatuses } from './attentionArrival'
 export type CritiqueFault = 'predict' | 'reason_narrow' | 'ask_user'
 
 export type PredictSub =
-  | 'reframe' // A1 框错 → 只重 decide
-  | 'need_peek' // A2 门偏/不够 → decide 后再 peek（策略先迭代）
-  | 'drop_briefs' // A3 死路 brief
+  | 'reframe' // 同问 · 框错 → 重 decide
+  | 'need_peek' // 同问 · 材料不够 → decide ± peek
+  | 'drop_briefs' // 同问 · 剔死路 brief
+  | 'revise_q' // 预测侧换问（新 qk，非 deepen 子问）
 
 export type ReasonSub =
-  | 'same_q' // B1 同问换推
-  | 'deepen' // B2 深化 Q
+  | 'same_q' // 同问换推
+  | 'deepen' // 深化子 Q（继承父 prospect）
 
 export interface CritiqueAutopsy {
-  /** 把推理带进死胡同的 prospect */
   badProspectKeys: string[]
-  /** ι 咬过、仍可能有用的 brief */
   keepBriefKeys: string[]
-  /** 应剔的死路 brief */
   dropBriefKeys: string[]
-  /** 应排除的坏 ι（推理轨必带；预测轨作尸检记录） */
   excludeInferKeys: string[]
-  /** ι 咬过的 bookKey（供后续 seedRange 参考，不直接当 seed） */
   touchedBookKeys: string[]
-  /** 给人看的失败形态 */
+  /** 本轮否定的 path（同问复盘禁采纳；换问时亦勿直接 reuse 这条死路） */
+  badPathKeys: string[]
   failShape: string
 }
 
@@ -46,10 +45,11 @@ export interface CritiqueDecision {
   fault: CritiqueFault
   predictSub?: PredictSub
   reasonSub?: ReasonSub
-  /** 深化问文（reason_narrow + deepen） */
+  /** 狭义推理 deepen 的子问文 */
   deepenQuestion?: string
+  /** 预测轨 revise_q 的新问文（独立 qk，非父链深化） */
+  reviseQuestion?: string
   autopsy: CritiqueAutopsy
-  /** 写入 decide 窗的策略提示（预测轨） */
   decideStrategyHint: string
   why: string
   raw: string
@@ -69,7 +69,25 @@ export interface CritiqueLedger {
     bookKeys: string[]
     text: string
   }>
+  /** 本问已落 path（配对结果 = 归因仪表） */
+  paths: Array<{
+    pathKey: string
+    inferKey: string
+    prospectKey: string
+    matchMode: string
+  }>
   pathKeys: string[]
+  /**
+   * 上一轮 query LLM 落账的 neighbour I/O：
+   * 历史问与现问的相关度 + 该历史线上的 path —— 供判「贴着 reuse / 躲开 / 换问」
+   */
+  queryNeighbours: Array<{
+    neighbourKey: string
+    historicQueryKey: string
+    historicQuestion: string
+    degree: string
+    pathKeys: string[]
+  }>
   pending: boolean
   weakDecideKeys: string[]
   unreadDecideKeys: string[]
@@ -96,19 +114,47 @@ export function gatherCritiqueLedger(queryKey: string): CritiqueLedger | null {
       text: e.infer || e.rationale,
     }))
   if (prospects.length === 0 && infers.length === 0) return null
-  const pathKeys = st
-    .listPathsForQueryKey(qk)
-    .map((p) => p.pathKey)
+
+  const paths = st.listPathsForQueryKey(qk).map((p) => ({
+    pathKey: p.pathKey,
+    inferKey: p.inferKey,
+    prospectKey: p.prospectKey,
+    matchMode: p.matchMode,
+  }))
+  // 挂起未配时，把候选 ι×prospect 也视作「本轮待审成案」参考
+  const pending = st.pendingPathMatch
+  const pathKeys = [
+    ...new Set([
+      ...paths.map((p) => p.pathKey),
+      ...(pending?.queryKey === qk
+        ? [] // 尚无 pathKey；坏 path 由事后落账补
+        : []),
+    ]),
+  ]
+
+  const queryNeighbours = st.neighbours
+    .filter((n) => n.nowQueryKey === qk || family.has(n.nowQueryKey))
+    .map((n) => {
+      const hq = n.historicQueryKey
+      return {
+        neighbourKey: n.neighbourKey,
+        historicQueryKey: hq,
+        historicQuestion: st.settledQueries[hq] ?? '',
+        degree: n.degree,
+        pathKeys: st.listPathsForQueryKey(hq).map((p) => p.pathKey),
+      }
+    })
+
   return {
     queryKey: qk,
     question,
     parentQueryKey: st.getQueryParent(qk),
     prospects,
     infers,
+    paths,
     pathKeys,
-    pending: Boolean(
-      st.pendingPathMatch && st.pendingPathMatch.queryKey === qk,
-    ),
+    queryNeighbours,
+    pending: Boolean(pending && pending.queryKey === qk),
     weakDecideKeys: st.listKeysNeedingMore('decide'),
     unreadDecideKeys: st.listKeysUnread('decide'),
   }
@@ -120,12 +166,33 @@ function formatLedger(ledger: CritiqueLedger): string {
     `Q：${ledger.question}`,
     `parentQueryKey=${ledger.parentQueryKey ?? '∅（根）'}`,
     `pendingPath=${ledger.pending}`,
-    `pathKeys：${ledger.pathKeys.join(', ') || '∅'}`,
     `decide weak：${ledger.weakDecideKeys.slice(0, 12).join(', ') || '∅'}`,
     `decide unread：${ledger.unreadDecideKeys.slice(0, 12).join(', ') || '∅'}`,
     '',
-    '【prospects】',
+    '【本问 path · 配对仪表】',
   ]
+  if (ledger.paths.length === 0) {
+    lines.push('（尚无已落 path）')
+  } else {
+    for (const p of ledger.paths) {
+      lines.push(
+        `pathKey=\`${p.pathKey}\` ι=\`${p.inferKey}\` prospect=\`${p.prospectKey}\` mode=${p.matchMode}`,
+      )
+    }
+  }
+  lines.push('', '【上一轮 queryLLM · neighbour I/O】')
+  if (ledger.queryNeighbours.length === 0) {
+    lines.push('（无 neighbour；reuse 候选空，除非换问后重跑 query）')
+  } else {
+    for (const n of ledger.queryNeighbours) {
+      lines.push(
+        `neighbour=\`${n.neighbourKey}\` → historic=\`${n.historicQueryKey}\` degree=${n.degree}\n` +
+          `旧Q：${n.historicQuestion || '（无原文）'}\n` +
+          `该线上 pathKeys：${n.pathKeys.join(', ') || '∅'}\n`,
+      )
+    }
+  }
+  lines.push('', '【prospects】')
   for (const p of ledger.prospects) {
     lines.push(
       `prospectKey=\`${p.prospectKey}\` briefKey=\`${p.briefKey}\`\n${p.text}\n`,
@@ -147,8 +214,28 @@ function emptyAutopsy(): CritiqueAutopsy {
     dropBriefKeys: [],
     excludeInferKeys: [],
     touchedBookKeys: [],
+    badPathKeys: [],
     failShape: '',
   }
+}
+
+function defaultBadPaths(ledger: CritiqueLedger): string[] {
+  const fromSelf = ledger.pathKeys
+  // neighbour 线上与本问 ι/prospect 相交的 path，也标成嫌疑死路
+  const inferSet = new Set(ledger.infers.map((e) => e.inferKey))
+  const prSet = new Set(ledger.prospects.map((p) => p.prospectKey))
+  const st = useAttentionIo.getState()
+  const linked: string[] = []
+  for (const n of ledger.queryNeighbours) {
+    for (const pk of n.pathKeys) {
+      const row = st.paths.find((p) => p.pathKey === pk)
+      if (!row) continue
+      if (inferSet.has(row.inferKey) || prSet.has(row.prospectKey)) {
+        linked.push(pk)
+      }
+    }
+  }
+  return [...new Set([...fromSelf, ...linked])]
 }
 
 /** 启发式归因（LLM 失败或可规则命中时） */
@@ -168,23 +255,28 @@ export function heuristicCritique(input: {
       ...new Set(ledger.prospects.map((p) => p.briefKey).filter(Boolean)),
     ],
     badProspectKeys: ledger.prospects.map((p) => p.prospectKey),
+    badPathKeys: defaultBadPaths(ledger),
     failShape: 'heuristic',
   }
 
   const wantDeepen = /深化|收窄|更具体/.test(t)
+  const wantReviseQ =
+    /换问|改问|问偏|问法不对|不是这个问题|重新问|换个问题|推翻问|问错了/.test(t)
   const materialish =
     /材料|原文|贴|brief|不够|缺|seed|peek|扩搜|门牌|找错/.test(t)
   const predictish =
-    /预测|prospect|框错|不是这个可能|decide|决策/.test(t) || materialish
+    /预测|prospect|框错|不是这个可能|decide|决策/.test(t) ||
+    materialish ||
+    wantReviseQ
   const reasonish =
-    /推理|方向|换推|infer|ι|推歪|换条路|排除这条/.test(t) || wantDeepen
+    (/推理|方向|换推|infer|ι|推歪|换条路|排除这条/.test(t) || wantDeepen) &&
+    !wantReviseQ
 
   const hasProspect = ledger.prospects.length > 0
   const hasInfer = ledger.infers.length > 0
   const weak =
     ledger.weakDecideKeys.length > 0 || ledger.unreadDecideKeys.length > 0
 
-  // 材料∩大方向：有充分 prospect 且用户未主攻材料/预测
   if (reasonish && !predictish && hasProspect && hasInfer) {
     const deepText = wantDeepen
       ? t
@@ -197,7 +289,7 @@ export function heuristicCritique(input: {
       deepenQuestion: deepText,
       autopsy: {
         ...autopsy,
-        badProspectKeys: [], // 狭义推理不否定 prospect 大框
+        badProspectKeys: [],
         failShape: 'reason_narrow·须排除坏ι',
       },
       decideStrategyHint: '',
@@ -209,39 +301,83 @@ export function heuristicCritique(input: {
   }
 
   if (predictish || weak || (hasInfer && !reasonish)) {
-    const sub: PredictSub = materialish || weak
-      ? 'need_peek'
-      : /剔|死路|别用这|换材料/.test(t)
-        ? 'drop_briefs'
-        : 'reframe'
-    const hint =
-      sub === 'reframe'
-        ? `【监督尸检→decide 策略】勿再铸同构 prospect：${autopsy.badProspectKeys.map((k) => `\`${k}\``).join(', ') || '（见上轮）'}。` +
-          `失败形态：旧 ι 在错误预测上硬撑。新 prospect 须避开这类走法。` +
-          `可留 brief：${autopsy.keepBriefKeys.slice(0, 8).join(', ') || '窗内 brief'}。` +
-          `（本步只迭代 decide；若仍不够再 stopReason:peek+seedRange。）`
-        : sub === 'need_peek'
-          ? `【监督尸检→decide 策略】材料/邻域可能不够。先重 decide；若仍 insufficient，再 peek。` +
-            `ι 咬过 book：${autopsy.touchedBookKeys.slice(0, 8).join(', ') || '∅'}（供日后 seedRange 参考，非本步直接写 seed）。` +
-            `坏 prospect：${autopsy.badProspectKeys.slice(0, 6).join(', ') || '∅'}。`
-          : `【监督尸检→decide 策略】死路 brief 建议剔除后再预测：` +
-            `${autopsy.dropBriefKeys.slice(0, 8).join(', ') || autopsy.keepBriefKeys.slice(0, 4).join(', ')}。`
+    let sub: PredictSub = wantReviseQ
+      ? 'revise_q'
+      : materialish || weak
+        ? 'need_peek'
+        : /剔|死路|别用这|换材料/.test(t)
+          ? 'drop_briefs'
+          : 'reframe'
 
-    if (sub === 'drop_briefs' && autopsy.dropBriefKeys.length === 0) {
-      autopsy.dropBriefKeys = autopsy.keepBriefKeys.slice(0, 2)
+    if (sub === 'drop_briefs') {
+      if (autopsy.dropBriefKeys.length === 0) {
+        const badSet = new Set(autopsy.badProspectKeys)
+        const fromBad = ledger.prospects
+          .filter((p) => badSet.has(p.prospectKey))
+          .map((p) => p.briefKey)
+          .filter(Boolean)
+        autopsy.dropBriefKeys = [...new Set(fromBad)]
+      }
+      if (autopsy.dropBriefKeys.length === 0) {
+        sub = 'reframe'
+        autopsy.failShape = 'drop_briefs·无可靠死路brief→reframe'
+      } else {
+        const dropSet = new Set(autopsy.dropBriefKeys)
+        autopsy.keepBriefKeys = autopsy.keepBriefKeys.filter(
+          (k) => !dropSet.has(k),
+        )
+      }
     }
+
+    const reviseQuestion =
+      sub === 'revise_q'
+        ? t
+            .replace(
+              /^(请)?(换问|改问|重新问|换个问题|推翻问|问法不对)[：:\s]*/i,
+              '',
+            )
+            .trim() || t
+        : undefined
+
+    const nbHint =
+      ledger.queryNeighbours.length > 0
+        ? `参考 query 邻域：${ledger.queryNeighbours
+            .slice(0, 4)
+            .map(
+              (n) =>
+                `${n.historicQueryKey}(${n.degree})→path×${n.pathKeys.length}`,
+            )
+            .join('；')}。同问禁坏 path：${autopsy.badPathKeys.slice(0, 6).join(',') || '∅'}；其它邻域 path 仍可 reuse。`
+        : `无 neighbour I/O；坏 path：${autopsy.badPathKeys.slice(0, 6).join(',') || '∅'}。`
+
+    const hint =
+      sub === 'revise_q'
+        ? `【监督尸检→换问】旧 Q 立错。新问勿继承旧 prospect 框。旧 ι/prospect 仅负向样本。${nbHint}` +
+          `坏 prospect：${autopsy.badProspectKeys.slice(0, 6).join(', ') || '∅'}。`
+        : sub === 'reframe'
+          ? `【监督尸检→decide 策略】勿再铸同构 prospect：${autopsy.badProspectKeys.map((k) => `\`${k}\``).join(', ') || '（见上轮）'}。` +
+            `失败形态：旧 ι 在错误预测上硬撑。${nbHint}` +
+            `可留 brief：${autopsy.keepBriefKeys.slice(0, 8).join(', ') || '窗内 brief'}。`
+          : sub === 'need_peek'
+            ? `【监督尸检→decide 策略】材料/邻域可能不够。先重 decide；若仍 insufficient，再 peek。${nbHint}` +
+              `ι 咬过 book：${autopsy.touchedBookKeys.slice(0, 8).join(', ') || '∅'}。`
+            : `【监督尸检→decide 策略】死路 brief 建议剔除：${autopsy.dropBriefKeys.slice(0, 8).join(', ')}。` +
+              `可留：${autopsy.keepBriefKeys.slice(0, 8).join(', ') || '其余 brief'}。${nbHint}`
 
     return {
       fault: 'predict',
       predictSub: sub,
+      reviseQuestion,
       autopsy,
       decideStrategyHint: hint,
       why:
-        sub === 'reframe'
-          ? '预测框错；迭代 decide 策略（旧 ι 作尸检，非玩法 B）'
-          : sub === 'need_peek'
-            ? '材料侧嫌疑；先 decide 策略，不够再热启 peek'
-            : '死路 brief；剔后重 decide',
+        sub === 'revise_q'
+          ? '问法立错（预测侧换问）；新 qk 走标准流含 reuse；≠ 狭义深化'
+          : sub === 'reframe'
+            ? '预测框错；同问重 decide；禁坏 path，其它邻域可 reuse'
+            : sub === 'need_peek'
+              ? '材料侧嫌疑；同问补材料；禁坏 path'
+              : '死路 brief；剔后重 decide',
       raw: '',
     }
   }
@@ -250,7 +386,7 @@ export function heuristicCritique(input: {
     fault: 'ask_user',
     autopsy,
     decideStrategyHint: '',
-    why: '说不清是预测（材料/prospect）还是狭义推理（方向/ι）。请点明。',
+    why: '说不清是预测（材料/prospect/换问）还是狭义推理（方向/ι）。请点明。',
     raw: '',
   }
 }
@@ -288,15 +424,22 @@ function parseCritiqueJson(
     touchedBookKeys: asKeys(
       autopsyIn.touchedBookKeys ?? autopsyIn.bookKeys,
     ),
+    badPathKeys: asKeys(autopsyIn.badPathKeys ?? autopsyIn.badPaths),
     failShape: String(autopsyIn.failShape ?? root.why ?? '').trim(),
   }
   if (autopsy.excludeInferKeys.length === 0) {
     autopsy.excludeInferKeys = ledger.infers.map((e) => e.inferKey)
   }
+  if (autopsy.badPathKeys.length === 0) {
+    autopsy.badPathKeys = defaultBadPaths(ledger)
+  }
 
   const why = String(root.why ?? root.note ?? '').trim() || fault
   const deepenQuestion = String(
     root.deepenQuestion ?? root.deepen ?? '',
+  ).trim()
+  const reviseQuestion = String(
+    root.reviseQuestion ?? root.newQuestion ?? '',
   ).trim()
 
   if (fault === 'reason_narrow') {
@@ -317,17 +460,20 @@ function parseCritiqueJson(
 
   if (fault === 'predict') {
     let predictSub: PredictSub = 'reframe'
-    if (/peek|seed|材料|扩/i.test(subRaw)) predictSub = 'need_peek'
+    if (/revise|换问|改问|问法/i.test(subRaw) || reviseQuestion) {
+      predictSub = 'revise_q'
+    } else if (/peek|seed|材料|扩/i.test(subRaw)) predictSub = 'need_peek'
     else if (/drop|剔|死路/i.test(subRaw)) predictSub = 'drop_briefs'
     const hint =
       String(root.decideStrategyHint ?? root.strategyHint ?? '').trim() ||
       heuristicCritique({
-        userText: why,
+        userText: why + (reviseQuestion ? ` 换问：${reviseQuestion}` : ''),
         ledger,
       }).decideStrategyHint
     return {
       fault,
       predictSub,
+      reviseQuestion: reviseQuestion || undefined,
       autopsy,
       decideStrategyHint: hint,
       why,
@@ -384,10 +530,15 @@ export async function runSuperviseCritique(input: {
           {
             role: 'system',
             content:
-              '你是写信台监督归因（不是 path 配对）。只判两轨之一：\n' +
-              '1) predict：材料/prospect 问题；旧 ι 只作尸检，给下一轮 decide 策略（勿直接当换推理；seedRange 只在 decide 仍不够后才考虑）。\n' +
-              '2) reason_narrow：材料∩预测大方向仍成立；同问换推或深化 Q；必须排除坏 ι；禁止重跑 decide。\n' +
-              '只输出 JSON：{"fault":"predict"|"reason_narrow"|"ask_user","sub":"reframe|need_peek|drop_briefs|same_q|deepen","deepenQuestion":"…或空","autopsy":{"badProspectKeys":[],"keepBriefKeys":[],"dropBriefKeys":[],"excludeInferKeys":[],"touchedBookKeys":[],"failShape":"…"},"decideStrategyHint":"预测轨给 decide 的策略原文；推理轨留空","why":"…"}',
+              '你是写信台监督归因（不是 path 配对）。path 与 query→neighbour 是参考仪表。\n' +
+              '只判两轨之一：\n' +
+              '1) predict：材料/prospect/问法立错。子型：\n' +
+              '   - reframe|need_peek|drop_briefs：同问；禁采纳 badPathKeys；其它 neighbour 线上 path 仍可 reuse。\n' +
+              '   - revise_q：问法推翻；输出 reviseQuestion；新问独立 qk（不要当成 deepen 子问）；标准流含 reuse；旧 ι/prospect 只负向。\n' +
+              '2) reason_narrow：材料∩预测大方向仍成立；same_q 换推或 deepen 子问；必排坏 ι；禁止重跑 decide。\n' +
+              '判 revise_q vs deepen：问法立错→revise_q；大框仍对只收窄→deepen。\n' +
+              '参考【上一轮 queryLLM · neighbour I/O】决定：贴着哪条历史 reuse、躲开哪条死路、是否该换问。\n' +
+              '只输出 JSON：{"fault":"predict"|"reason_narrow"|"ask_user","sub":"reframe|need_peek|drop_briefs|revise_q|same_q|deepen","reviseQuestion":"…或空","deepenQuestion":"…或空","autopsy":{"badProspectKeys":[],"keepBriefKeys":[],"dropBriefKeys":[],"excludeInferKeys":[],"touchedBookKeys":[],"badPathKeys":[],"failShape":"…"},"decideStrategyHint":"…","why":"…"}',
           },
           {
             role: 'user',
@@ -419,6 +570,8 @@ export async function runSuperviseCritique(input: {
       windowKeys: [
         ...ledger.prospects.map((p) => p.prospectKey),
         ...ledger.infers.map((e) => e.inferKey),
+        ...ledger.pathKeys,
+        ...ledger.queryNeighbours.map((n) => n.neighbourKey),
       ],
     })
     return parseCritiqueJson(content, ledger) ?? fallback

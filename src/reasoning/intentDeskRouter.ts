@@ -100,7 +100,7 @@ export function classifyUtterance(userText: string): 'instruction' | 'question' 
   if (
     /^(显示|打开|调取|展开|看看|只看)/.test(t) ||
     /请?(跑|启|开|执行|重跑)?\s*(peek|decide|infer|query|reuse|监督)/i.test(t) ||
-    /单启|单独跑|只跑|跳过匹配|监督匹配|确认匹配|path\s*匹配|深化|收窄|监督归因|不满|换方向|换推|推理不对|预测不对|材料不够/.test(t) ||
+    /单启|单独跑|只跑|跳过匹配|监督匹配|确认匹配|path\s*匹配|深化|收窄|监督归因|不满|换方向|换推|推理不对|预测不对|材料不够|换问|改问|问法不对/.test(t) ||
     /^(noop|通过)\s*$/i.test(t)
   ) {
     return 'instruction'
@@ -129,12 +129,24 @@ export function heuristicIntent(input: {
   if (input.intro.kind === 'none') {
     if (!t) return { type: 'ask_user', prompt: '请输入问题，或钉住某步 LLM 的 I/O 再调度。' }
     if (kind === 'instruction') {
-      // 监督归因：预测轨 vs 狭义推理轨（需台账已有 prospect/infer）
+      const st = useAttentionIo.getState()
+      // path 配对监督：有挂起时，「跳过匹配 / 监督匹配 / 纯“监督”」走配对，不走归因两轨
       if (
-        /监督归因|归因|不满|推理不对|预测不对|材料不够|换方向|换推/.test(t) ||
-        (/监督/.test(t) && !/跳过匹配|监督匹配/.test(t))
+        st.pendingPathMatch &&
+        (/跳过匹配|监督匹配/.test(t) || /^监督\s*$/.test(t))
       ) {
-        const st = useAttentionIo.getState()
+        return {
+          type: 'ask_user',
+          prompt:
+            'path 匹配：请在图上高亮 infer×prospect 后确认匹配；或说「跳过匹配」以触发监督 LLM（需有 pending）。',
+        }
+      }
+      // 监督归因：预测轨 vs 狭义推理轨（需台账已有 prospect/infer）
+      // 不含光秃「监督」（上面已分流）；「监督归因 / 不满 / …」才归因
+      if (
+        /监督归因|归因|不满|推理不对|预测不对|材料不够|换方向|换推|换问|改问|问法不对/.test(t) ||
+        (/监督/.test(t) && !/跳过匹配|监督匹配|^监督\s*$/.test(t))
+      ) {
         const qk =
           st.pendingPathMatch?.queryKey ||
           st.selectedQueryKey ||
@@ -272,7 +284,21 @@ export function heuristicIntent(input: {
     if (!edge) {
       return { type: 'ask_user', prompt: '选中的 inferKey 已失效，请重新点开 ι。' }
     }
-    if (otherDir || rerun) {
+    // 不满/材料/预测 → 统一进监督两轨；仅明确「换推/排除这条」才直跳玩法 B
+    const wantCritique =
+      /监督归因|归因|不满|推理不对|预测不对|材料不够|框错|不够|换方向|换问|改问|问法不对/.test(
+        t,
+      ) ||
+      (/不对|错了|重来|重新|重跑|再试/.test(t) &&
+        !/换推|排除这条|换条路|另一/.test(t))
+    if (wantCritique) {
+      return {
+        type: 'critique',
+        queryKey: edge.queryKey,
+        note: '钉ι · 监督归因（预测 vs 狭义推理）',
+      }
+    }
+    if (otherDir || /换推|排除这条|换条路/.test(t)) {
       const pkg: LetterDeskPackage = {
         id: sid(),
         edgeId: edge.id,
@@ -290,7 +316,7 @@ export function heuristicIntent(input: {
     return {
       type: 'ask_user',
       prompt:
-        '已钉住 inferKey I/O。请说明：重跑/换方向（玩法B），还是满意推进？',
+        '已钉住推理结果。请说明：材料/预测不对（监督归因），还是换推/排除这条，或满意推进？',
     }
   }
 
@@ -407,6 +433,7 @@ export async function refineIntentWithLlm(input: {
               '先判 instruction|question。question→auto_flow；instruction→单启 peek/decide/infer/query、监督归因(critique)、调显或跳过匹配。' +
               '只输出 JSON：{"action":"auto_flow"|"critique"|"dispatch_decide"|"dispatch_peek"|"dispatch_query"|"dispatch_infer"|"skip_path_match"|"ask_user"|"noop"|"show","attentionArrived":true|false,"note":"…"}。' +
               '不满/推理不对/预测不对/材料不够/监督归因 → critique（需台账已有 prospect 或 infer）。' +
+              '仅「换推/排除这条」可直跳 dispatch_infer；有 pending 时跳过匹配/监督匹配/纯监督 → skip_path_match。' +
               '不写 keep/路径/brief；不翻库；不把意图记录当成注意力窗 I/O。',
           },
           {
@@ -451,7 +478,7 @@ export async function refineIntentWithLlm(input: {
     if (action === 'show')
       return { type: 'show', prompt: obj.note || '调显' }
     if (action === 'skip_path_match')
-      return { type: 'ask_user', prompt: '跳过匹配' }
+      return { type: 'ask_user', prompt: '跳过匹配' } // runComposerTurn 见 pending 后真跑配对
     if (action === 'ask_user')
       return {
         type: 'ask_user',
@@ -685,24 +712,13 @@ export async function runComposerTurn(input: {
                   (intent.note ? ` · ${intent.note}` : '')),
   })
 
-  if (intent.type === 'ask_user') {
-    useAttentionIo.getState().setDeskPrompt(`写信台 · ${intent.prompt}`)
-    return { ok: false, answer: '', note: `ask_user · ${intent.prompt}` }
-  }
-  if (intent.type === 'noop') {
-    return { ok: true, answer: '', note: intent.note }
-  }
-  if (intent.type === 'show') {
-    useAttentionIo.getState().setDeskPrompt(`写信台 · ${intent.prompt}`)
-    return { ok: true, answer: intent.prompt, note: `show · ${intent.prompt}` }
-  }
-
-  // 指令：跳过 path 匹配 → 监督 LLM
+  // path 配对监督须先于 ask_user 早退（启发式对「跳过匹配」会先 ask_user 提示）
   if (
-    /跳过匹配|监督匹配/.test(input.question) &&
-    useAttentionIo.getState().pendingPathMatch
+    useAttentionIo.getState().pendingPathMatch &&
+    (/跳过匹配|监督匹配/.test(input.question) ||
+      /^监督\s*$/.test(input.question.trim()))
   ) {
-    input.onProgress?.('写信台 · 用户跳过匹配 → 监督 LLM…')
+    input.onProgress?.('写信台 · 用户跳过匹配 → path 监督 LLM…')
     const { skipPendingPathMatchToSupervise } = await import(
       './letterDeskDispatch'
     )
@@ -714,6 +730,18 @@ export async function runComposerTurn(input: {
       answer: `### path 监督匹配\n${r.note}\npathKeys: ${r.pathKeys.map((k) => `\`${k}\``).join(', ')}`,
       note: r.note,
     }
+  }
+
+  if (intent.type === 'ask_user') {
+    useAttentionIo.getState().setDeskPrompt(`写信台 · ${intent.prompt}`)
+    return { ok: false, answer: '', note: `ask_user · ${intent.prompt}` }
+  }
+  if (intent.type === 'noop') {
+    return { ok: true, answer: '', note: intent.note }
+  }
+  if (intent.type === 'show') {
+    useAttentionIo.getState().setDeskPrompt(`写信台 · ${intent.prompt}`)
+    return { ok: true, answer: intent.prompt, note: `show · ${intent.prompt}` }
   }
 
   if (intent.type === 'critique') {
