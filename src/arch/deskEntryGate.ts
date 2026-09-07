@@ -32,10 +32,35 @@ export function deskHasSettledQueryKeys(): boolean {
 export function listSettledQueryEntries(): Array<{
   queryKey: string
   qText: string
+  parentQueryKey?: string
 }> {
-  const settled = useAttentionIo.getState().settledQueries
+  const st = useAttentionIo.getState()
+  const settled = st.settledQueries
+  const parentOf = st.queryParentOf
   return Object.entries(settled).map(([queryKey, qText]) => ({
     queryKey,
     qText,
+    parentQueryKey: parentOf[queryKey],
   }))
+}
+
+/**
+ * queryLLM 历史池：含各题族的根与深化子问，排除 Q_now 自身。
+ * 深化子问会出现在池中，供 neighbour 与父/兄比较。
+ */
+export function listHistoricQueryEntriesForNeighbour(nowQueryKey?: string): Array<{
+  queryKey: string
+  qText: string
+  parentQueryKey?: string
+  familyRole: 'root' | 'deepen'
+}> {
+  const now = nowQueryKey?.trim() || ''
+  return listSettledQueryEntries()
+    .filter((e) => e.queryKey !== now)
+    .map((e) => ({
+      queryKey: e.queryKey,
+      qText: e.qText,
+      parentQueryKey: e.parentQueryKey,
+      familyRole: e.parentQueryKey ? ('deepen' as const) : ('root' as const),
+    }))
 }

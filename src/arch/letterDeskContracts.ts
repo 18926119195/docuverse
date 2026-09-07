@@ -40,7 +40,8 @@ export const DESK_CONTRACTS: Record<DeskJob, DeskContract> = {
     job: 'query',
     allow: ['queryKey'],
     forbid: ['bookKey', 'briefKey'],
-    inNote: '旧 queryKey + 历史 Q 文 + Q_now（阶段 A · 无 brief）',
+    inNote:
+      '历史问族 queryKey+Q（含根与深化子问；排除 Q_now）+ Q_now（阶段 A · 无 brief）',
     outNote:
       'neighbours[{queryKey, degree}]（对称子集 + 相关度增量）；' +
       '台为每条 settle neighbourKey 挂在该 historic queryKey 上；' +

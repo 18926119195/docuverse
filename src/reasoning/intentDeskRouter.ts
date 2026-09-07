@@ -85,8 +85,9 @@ export function detectIntroducedIo(): {
   }
 }
 export type IntentAction =
-  | { type: 'auto_flow' }
+  | { type: 'auto_flow'; question?: string; note?: string }
   | { type: 'dispatch'; packages: LetterDeskPackage[] }
+  | { type: 'critique'; queryKey: string; note?: string }
   | { type: 'ask_user'; prompt: string }
   | { type: 'noop'; note: string }
   | { type: 'show'; prompt: string }
@@ -99,7 +100,7 @@ export function classifyUtterance(userText: string): 'instruction' | 'question' 
   if (
     /^(显示|打开|调取|展开|看看|只看)/.test(t) ||
     /请?(跑|启|开|执行|重跑)?\s*(peek|decide|infer|query|reuse|监督)/i.test(t) ||
-    /单启|单独跑|只跑|跳过匹配|监督匹配|确认匹配|path\s*匹配/.test(t) ||
+    /单启|单独跑|只跑|跳过匹配|监督匹配|确认匹配|path\s*匹配|深化|收窄|监督归因|不满|换方向|换推|推理不对|预测不对|材料不够/.test(t) ||
     /^(noop|通过)\s*$/i.test(t)
   ) {
     return 'instruction'
@@ -128,6 +129,33 @@ export function heuristicIntent(input: {
   if (input.intro.kind === 'none') {
     if (!t) return { type: 'ask_user', prompt: '请输入问题，或钉住某步 LLM 的 I/O 再调度。' }
     if (kind === 'instruction') {
+      // 监督归因：预测轨 vs 狭义推理轨（需台账已有 prospect/infer）
+      if (
+        /监督归因|归因|不满|推理不对|预测不对|材料不够|换方向|换推/.test(t) ||
+        (/监督/.test(t) && !/跳过匹配|监督匹配/.test(t))
+      ) {
+        const st = useAttentionIo.getState()
+        const qk =
+          st.pendingPathMatch?.queryKey ||
+          st.selectedQueryKey ||
+          (st.selectedInferKey
+            ? st.inferEdges.find((e) => e.inferKey === st.selectedInferKey)
+                ?.queryKey
+            : undefined) ||
+          Object.keys(st.settledQueries).slice(-1)[0]
+        if (qk && (st.prospects.length > 0 || st.inferEdges.length > 0)) {
+          return {
+            type: 'critique',
+            queryKey: qk,
+            note: '监督归因 · 预测 vs 狭义推理',
+          }
+        }
+        return {
+          type: 'ask_user',
+          prompt:
+            '监督归因需要本问已有 prospect/infer。请先跑自动流，或钉住 query/infer。',
+        }
+      }
       // 单启某 LLM / 调显
       if (/跳过匹配|监督匹配/.test(t)) {
         return {
@@ -267,6 +295,25 @@ export function heuristicIntent(input: {
   }
 
   if (input.intro.kind === 'selected_query') {
+    const parentQk = input.intro.queryKey!
+    // 深化：钉住旧问后给出更具体问句 → 子 qk → auto_flow（可跳过 decide）
+    if (/深化|收窄|更具体/.test(t)) {
+      const deepText =
+        t
+          .replace(/^(请)?(深化|收窄|更具体)(问句|问题|一下|这题)?[：:\s]*/i, '')
+          .trim() || t
+      const childQk = useAttentionIo.getState().ensureDeepenedQueryKey({
+        parentQueryKey: parentQk,
+        question: deepText,
+      })
+      const childQ =
+        useAttentionIo.getState().settledQueries[childQk] || deepText
+      return {
+        type: 'auto_flow',
+        question: childQ,
+        note: `深化 · child=${childQk} ← parent=${parentQk}`,
+      }
+    }
     if (advance || rerun || t) {
       const pkg: LetterDeskPackage = {
         id: sid(),
@@ -282,7 +329,8 @@ export function heuristicIntent(input: {
     }
     return {
       type: 'ask_user',
-      prompt: '已钉住 queryKey I/O。要重跑阶段 A，还是说明你想做什么？',
+      prompt:
+        '已钉住 queryKey。可：重跑阶段 A；或说「深化：…」收窄问法（子 qk，可跳过 decide）。',
     }
   }
 
@@ -356,8 +404,9 @@ export async function refineIntentWithLlm(input: {
             role: 'system',
             content:
               `你是轻量意图路由（会话 epoch=${useAttentionIo.getState().intentSessionEpoch}）。` +
-              '先判 instruction|question。question→auto_flow；instruction→单启 peek/decide/infer/query 或调显或跳过匹配。' +
-              '只输出 JSON：{"action":"auto_flow"|"dispatch_decide"|"dispatch_peek"|"dispatch_query"|"dispatch_infer"|"skip_path_match"|"ask_user"|"noop"|"show","attentionArrived":true|false,"note":"…"}。' +
+              '先判 instruction|question。question→auto_flow；instruction→单启 peek/decide/infer/query、监督归因(critique)、调显或跳过匹配。' +
+              '只输出 JSON：{"action":"auto_flow"|"critique"|"dispatch_decide"|"dispatch_peek"|"dispatch_query"|"dispatch_infer"|"skip_path_match"|"ask_user"|"noop"|"show","attentionArrived":true|false,"note":"…"}。' +
+              '不满/推理不对/预测不对/材料不够/监督归因 → critique（需台账已有 prospect 或 infer）。' +
               '不写 keep/路径/brief；不翻库；不把意图记录当成注意力窗 I/O。',
           },
           {
@@ -391,6 +440,12 @@ export async function refineIntentWithLlm(input: {
     const obj = JSON.parse(m[0]) as { action?: string; note?: string }
     const action = String(obj.action ?? '')
     if (action === 'auto_flow') return { type: 'auto_flow' }
+    if (action === 'critique') {
+      return heuristicIntent({
+        userText: '监督归因',
+        intro: input.intro,
+      })
+    }
     if (action === 'noop')
       return { type: 'noop', note: obj.note || 'noop' }
     if (action === 'show')
@@ -561,14 +616,10 @@ export async function runComposerTurn(input: {
 }): Promise<{ ok: boolean; answer: string; note: string }> {
   const intro = detectIntroducedIo()
   const epoch = useAttentionIo.getState().intentSessionEpoch
-  const q = input.question.trim()
-  // 同问同键：先 ensure（复用或新铸），后续空位都挂这条 qk
-  const turnQueryKey = q
-    ? useAttentionIo.getState().ensureQueryKey(q)
-    : ''
+  const qRaw = input.question.trim()
 
   let intent = heuristicIntent({ userText: input.question, intro })
-  if (intent.type === 'ask_user' && q) {
+  if (intent.type === 'ask_user' && qRaw) {
     input.onProgress?.(
       `意图路由 · 轻量 LLM（会话 epoch=${epoch}）…`,
     )
@@ -579,27 +630,43 @@ export async function runComposerTurn(input: {
     })
   }
 
+  // 深化 auto_flow 已铸子 qk；监督归因用 intent.queryKey；其余路径再 ensure 根/同文键
+  const flowQuestion =
+    intent.type === 'auto_flow' && intent.question?.trim()
+      ? intent.question.trim()
+      : intent.type === 'critique'
+        ? useAttentionIo.getState().settledQueries[intent.queryKey] || qRaw
+        : qRaw
+  const turnQueryKey =
+    intent.type === 'critique'
+      ? intent.queryKey
+      : flowQuestion
+        ? useAttentionIo.getState().ensureQueryKey(flowQuestion)
+        : ''
+
   // 空位导航：纯问题 + 未钉包 → 台账事实交给意图 LLM 决策（失败才代码兜底）
   let gapNote = ''
   if (
     intro.kind === 'none' &&
-    q &&
+    intent.type !== 'critique' &&
+    flowQuestion &&
     turnQueryKey &&
-    classifyUtterance(q) === 'question' &&
-    (intent.type === 'auto_flow' || intent.type === 'ask_user')
+    classifyUtterance(flowQuestion) === 'question' &&
+    (intent.type === 'auto_flow' || intent.type === 'ask_user') &&
+    !(intent.type === 'auto_flow' && intent.note?.startsWith('深化'))
   ) {
     const gap = inspectQueryGap({
       docId: input.bookIndex.docId,
       queryKey: turnQueryKey,
-      question: q,
+      question: flowQuestion,
     })
     input.onProgress?.(`空位检视 · ${gap.kind} · 交意图 LLM…`)
-    intent = await navigateGapWithIntentLlm({ userText: q, gap })
+    intent = await navigateGapWithIntentLlm({ userText: flowQuestion, gap })
     gapNote = `gap=${gap.kind} · ${gap.reason}`
   }
 
   useAttentionIo.getState().pushIntentDeskLog({
-    question: input.question,
+    question: flowQuestion || input.question,
     action: intent.type,
     note:
       (gapNote ? `${gapNote} · ` : '') +
@@ -609,9 +676,13 @@ export async function runComposerTurn(input: {
           ? intent.note
           : intent.type === 'show'
             ? intent.prompt
-            : intent.type === 'dispatch'
-              ? `dispatch×${intent.packages.length} · qk=${turnQueryKey}`
-              : `auto_flow · qk=${turnQueryKey} · epoch=${epoch}`),
+            : intent.type === 'critique'
+              ? `critique · qk=${intent.queryKey}` +
+                (intent.note ? ` · ${intent.note}` : '')
+              : intent.type === 'dispatch'
+                ? `dispatch×${intent.packages.length} · qk=${turnQueryKey}`
+                : `auto_flow · qk=${turnQueryKey} · epoch=${epoch}` +
+                  (intent.note ? ` · ${intent.note}` : '')),
   })
 
   if (intent.type === 'ask_user') {
@@ -645,9 +716,28 @@ export async function runComposerTurn(input: {
     }
   }
 
+  if (intent.type === 'critique') {
+    input.onProgress?.(`监督归因 · qk=${intent.queryKey}…`)
+    const { runSuperviseCritique } = await import('./superviseCritique')
+    const { executeSuperviseCritique } = await import('./superviseCritiqueExec')
+    const decision = await runSuperviseCritique({
+      queryKey: intent.queryKey,
+      userText: input.question,
+      onProgress: input.onProgress,
+    })
+    return executeSuperviseCritique({
+      decision,
+      queryKey: intent.queryKey,
+      bookIndex: input.bookIndex,
+      userText: input.question,
+      onProgress: input.onProgress,
+      sealItems: input.sealItems,
+    })
+  }
+
   if (intent.type === 'auto_flow') {
     return runAutoFlow({
-      question: input.question,
+      question: flowQuestion,
       bookIndex: input.bookIndex,
       onProgress: input.onProgress,
       sealItems: input.sealItems,
@@ -657,10 +747,10 @@ export async function runComposerTurn(input: {
   // dispatch（空位单步或显式指令）
   const packages = intent.packages.map((p) => ({
     ...p,
-    question: p.question.trim() || q,
+    question: p.question.trim() || flowQuestion,
   }))
   return askDeepSeekWithLetterDesk({
-    question: q,
+    question: flowQuestion,
     packages,
     bookIndex: input.bookIndex,
     docId: input.bookIndex.docId,

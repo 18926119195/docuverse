@@ -30,7 +30,7 @@ import {
 import { settlePeekItemsFromLlm } from './a1DsChat'
 import type { InferEdge } from './attentionIoStore'
 import { LOCKED_LLM } from './modelRuntimeConfig'
-import { listSettledQueryEntries } from './deskEntryGate'
+import { listHistoricQueryEntriesForNeighbour } from './deskEntryGate'
 import {
   formatDirectedPathIncrementReturn,
   hopsFromAnswerParts,
@@ -48,6 +48,8 @@ export interface ThinSeed {
   versionIndex?: number
   /** decide 续滚：只展这些 briefKey */
   onlyBriefKeys?: string[]
+  /** 监督预测轨 → decide 策略提示 */
+  decideCritiqueHint?: string
 }
 
 export interface ExpandedKey {
@@ -59,6 +61,9 @@ export interface ExpandedKey {
   opened?: boolean
   /** query 窗：历史 Q 文 */
   qText?: string
+  /** query 窗：题族角色 */
+  familyRole?: 'root' | 'deepen'
+  parentQueryKey?: string
 }
 
 export interface AssembledWindow {
@@ -269,16 +274,30 @@ export function expandSeedsForJob(input: {
     }
 
     if (input.job === 'query') {
-      const all = listSettledQueryEntries()
+      const nowQk =
+        useAttentionIo.getState().findQueryKeyForQuestion(input.seeds[0]?.question ?? '') ||
+        ''
+      // 优先用种子 question 对应 qk；多 seed 时仍排除所有当前问文匹配
+      const nowKeys = new Set<string>()
+      for (const s of input.seeds) {
+        const qk = useAttentionIo.getState().findQueryKeyForQuestion(s.question)
+        if (qk) nowKeys.add(qk)
+      }
+      const historic = listHistoricQueryEntriesForNeighbour(
+        [...nowKeys][0] || nowQk || undefined,
+      ).filter((e) => !nowKeys.has(e.queryKey))
       preferByStatus(
         'queryKey',
-        all.map((e) => e.queryKey),
+        historic.map((e) => e.queryKey),
       )
-      // 补 qText
       for (const k of keys) {
         if (k.kind !== 'queryKey') continue
-        const hit = all.find((e) => e.queryKey === k.key)
-        if (hit) k.qText = hit.qText
+        const hit = historic.find((e) => e.queryKey === k.key)
+        if (hit) {
+          k.qText = hit.qText
+          k.familyRole = hit.familyRole
+          k.parentQueryKey = hit.parentQueryKey
+        }
       }
       continue
     }
@@ -372,15 +391,21 @@ export function assembleWindow(input: {
   keys: ExpandedKey[]
   /** 玩法 B：钉住 ι 换方向时要避开的 inferKey 原文 */
   excludeInfers?: Array<{ inferKey: string; rationale: string }>
+  /** 监督预测轨：decide 策略尸检 */
+  decideCritiqueHint?: string
 }): AssembledWindow {
   const contract = lookupContract(input.job)
   const lines: string[] = [`Q_now：${input.qNow}`, `契约 in：${contract.inNote}`, '']
 
   if (input.job === 'query') {
-    lines.push('【阶段 A · query 窗 · 仅 queryKey+历史Q · 无 brief】')
+    lines.push('【阶段 A · query 窗 · 历史问族（含根与深化）· 无 brief】')
     for (const k of input.keys.filter((x) => x.kind === 'queryKey')) {
+      const role =
+        k.familyRole === 'deepen'
+          ? `深化←\`${k.parentQueryKey || '?'}\``
+          : '根问'
       lines.push(
-        `queryKey=\`${k.key}\`\n历史Q：${k.qText || '（无原文）'}\n`,
+        `queryKey=\`${k.key}\` · ${role}\n历史Q：${k.qText || '（无原文）'}\n`,
       )
     }
     lines.push(
@@ -391,12 +416,16 @@ export function assembleWindow(input: {
         '  "attentionArrived": true | false\n' +
         '}\n' +
         '规则：对称输出 ⊆ 输入 historic queryKey；增量 = neighbour（该历史 Q 与 Q_now 的相关度）；\n' +
+        '历史池含「根问」与「深化子问」；深化问与其父/兄可比相关度（靠拢或拉开）；\n' +
         '台对每条 settle neighbourKey，挂在对应 historic queryKey 上；\n' +
         '不出 briefKey；不得渗透 bookKey/T。\n' +
         `- ${keyStatusContractHint('queryKey')}\n` +
         '- 窗内每个 historic queryKey 都要有 status（有 neighbour≈sufficient；未看=unread；看了但不相关=insufficient）。',
     )
   } else if (input.job === 'decide') {
+    if (input.decideCritiqueHint?.trim()) {
+      lines.push(input.decideCritiqueHint.trim(), '')
+    }
     lines.push('【brief 窗 · 仅 briefKey+brief】')
     for (const k of input.keys.filter((x) => x.kind === 'briefKey')) {
       const brief = fetchBriefText(input.docId, k.key)
@@ -541,15 +570,21 @@ export function assembleWindow(input: {
   }
 }
 
-/** 候选 path：仅经 neighbour 挂靠的历史 queryKey（架构 reuse，不按 book 扫） */
+/** 候选 path：neighbour 挂靠的历史 qk + 本问祖先链（深化可直用父 path） */
 export function listCandidatePathsViaNeighbours(nowQueryKey?: string) {
   const st = useAttentionIo.getState()
   const qk = nowQueryKey?.trim()
   if (!qk) return []
-  const historic = st.neighbours
-    .filter((n) => n.nowQueryKey === qk)
-    .map((n) => n.historicQueryKey)
-  if (historic.length === 0) return []
+  const historic = new Set(
+    st.neighbours
+      .filter((n) => n.nowQueryKey === qk)
+      .map((n) => n.historicQueryKey),
+  )
+  // 深化：父链 path 始终可进 reuse 候选（即使尚未落 neighbour）
+  for (const a of st.listQuerySelfAndAncestors(qk)) {
+    if (a !== qk) historic.add(a)
+  }
+  if (historic.size === 0) return []
   const out: ReturnType<typeof st.listPathsForQueryKey> = []
   const seen = new Set<string>()
   for (const hq of historic) {
@@ -912,7 +947,8 @@ export async function runPathMatchSuperviseIfNeeded(input: {
   }
 
   const inferEdges = st.inferEdges.filter((e) => e.queryKey === qk)
-  const prospects = st.prospects.filter((p) => p.queryKey === qk)
+  const family = new Set(st.listQuerySelfAndAncestors(qk))
+  const prospects = st.prospects.filter((p) => family.has(p.queryKey))
   if (inferEdges.length === 0 || prospects.length === 0) {
     return {
       pathKeys: [],
@@ -1036,6 +1072,7 @@ export async function dispatchLetterDesk(input: {
         job: pkg.job,
         versionIndex: pkg.versionIndex,
         onlyBriefKeys: pkg.onlyBriefKeys,
+        decideCritiqueHint: pkg.decideCritiqueHint,
       },
     ]
     const { keys, note: expNote } = expandSeedsForJob({
@@ -1052,69 +1089,97 @@ export async function dispatchLetterDesk(input: {
     }
 
     if (pkg.job === 'infer') {
-      // infer；reuse 只走 neighbour→path；失败后不向 infer 塞旧问法排除集
-      const priorPaths = listCandidatePathsViaNeighbours(turnQueryKey)
+      // infer；reuse 在前；再开时必排本问族已有 ι（狭义推理记忆，≠ reuse）
+      const { priorInferKeysForQuery } = await import('./superviseCritique')
+      const qkForPrior =
+        turnQueryKey ||
+        useAttentionIo.getState().findQueryKeyForQuestion(pkg.question) ||
+        ''
+      const priorIk = qkForPrior ? priorInferKeysForQuery(qkForPrior) : []
+      const wantExclude = [
+        ...new Set([
+          ...(pkg.excludeMode === 'B' ? pkg.excludeInferKeys ?? [] : []),
+          ...priorIk,
+        ]),
+      ]
 
-      let excludeInfers: Array<{ inferKey: string; rationale: string }> | undefined
+      // 显式玩法 B / 监督换推：跳过 reuse，直开带排除的 infer
+      const forceExcludeInfer =
+        pkg.excludeMode === 'B' && (pkg.excludeInferKeys?.length ?? 0) > 0
 
-      if (pkg.excludeMode === 'B' && (pkg.excludeInferKeys?.length ?? 0) > 0) {
-        const want = new Set(pkg.excludeInferKeys)
+      if (!forceExcludeInfer) {
+        const priorPaths = listCandidatePathsViaNeighbours(turnQueryKey)
+        if (priorPaths.length > 0) {
+          const gate = await runReuseGate({
+            qNow: pkg.question,
+            docId: input.docId,
+            queryKey: turnQueryKey,
+            onProgress: input.onProgress,
+          })
+          notes.push(gate.note)
+          if (gate.adopted) {
+            parts.push(
+              `### 复用 · 采纳旧 path ×${gate.pathKeys?.length ?? 1}（未开新 infer）\n` +
+                `现 queryKey=\`${gate.queryKey}\`\n` +
+                `pathKeys: ${(gate.pathKeys ?? [gate.pathKey]).map((k) => `\`${k}\``).join(', ')}\n` +
+                `reuseKeys: ${(gate.reuseKeys ?? [gate.reuseKey]).map((k) => `\`${k}\``).join(', ')}\n` +
+                `依据：${gate.judgments.filter((j) => j.canSolve).map((j) => j.rationale).join('；')}\n` +
+                `--- gate raw ---\n${gate.raw.trim()}`,
+            )
+            continue
+          }
+          parts.push(
+            `### 复用未采纳 → infer\n` +
+              `${gate.note}` +
+              (gate.excludeBriefKeys.length
+                ? ` · 已标剔 brief×${gate.excludeBriefKeys.length}（供 decide 前置，不进 infer 窗）`
+                : '') +
+              `\n` +
+              (gate.raw ? `--- gate raw ---\n${gate.raw.trim()}\n` : ''),
+          )
+        } else {
+          notes.push('复用跳过·无 neighbour→path')
+        }
+      }
+
+      if (wantExclude.length > 0) {
+        const want = new Set(wantExclude)
         const all = useAttentionIo.getState().inferEdges
-        excludeInfers = all
+        const excludeInfers = all
           .filter((e) => want.has(e.inferKey))
           .map((e) => ({
             inferKey: e.inferKey,
             rationale: e.infer || e.rationale,
           }))
-        notes.push(`infer 玩法 B · 排除 ι×${excludeInfers.length}`)
-        const main = await runMainInferAndSettle({
-          pkg,
-          bookIndex: input.bookIndex,
-          docId: input.docId,
-          keys,
-          seeds,
-          excludeInfers,
-          queryKey: turnQueryKey,
-          onProgress: input.onProgress,
-        })
-        parts.push(main.part)
-        notes.push(main.note)
-        continue
-      }
-
-      if (priorPaths.length > 0) {
-        const gate = await runReuseGate({
-          qNow: pkg.question,
-          docId: input.docId,
-          queryKey: turnQueryKey,
-          onProgress: input.onProgress,
-        })
-        notes.push(gate.note)
-        if (gate.adopted) {
+        if (excludeInfers.length === 0 && forceExcludeInfer) {
           parts.push(
-            `### 复用 · 采纳旧 path ×${gate.pathKeys?.length ?? 1}（未开新 infer）\n` +
-              `现 queryKey=\`${gate.queryKey}\`\n` +
-              `pathKeys: ${(gate.pathKeys ?? [gate.pathKey]).map((k) => `\`${k}\``).join(', ')}\n` +
-              `reuseKeys: ${(gate.reuseKeys ?? [gate.reuseKey]).map((k) => `\`${k}\``).join(', ')}\n` +
-              `依据：${gate.judgments.filter((j) => j.canSolve).map((j) => j.rationale).join('；')}\n` +
-              `--- gate raw ---\n${gate.raw.trim()}`,
+            `### infer · 拒绝无差分重跑\n排除键无法解析。请钉住 ι 或走监督归因。`,
           )
+          notes.push('infer 拒绝 · 排除集空解析')
           continue
         }
-        // reuse 失败：brief 剔除由 autoFlow 消费 excludeBriefKeys；infer 窗不再塞旧问法
-        parts.push(
-          `### 复用未采纳 → infer\n` +
-            `${gate.note}` +
-            (gate.excludeBriefKeys.length
-              ? ` · 已标剔 brief×${gate.excludeBriefKeys.length}（供 decide 前置，不进 infer 窗）`
-              : '') +
-            `\n` +
-            (gate.raw ? `--- gate raw ---\n${gate.raw.trim()}\n` : ''),
-        )
-      } else {
-        notes.push('复用跳过·无 neighbour→path')
+        if (excludeInfers.length > 0) {
+          notes.push(
+            `infer 必排先验 ι×${excludeInfers.length}` +
+              (forceExcludeInfer ? ' · 玩法B/监督' : ' · 自动'),
+          )
+          const main = await runMainInferAndSettle({
+            pkg,
+            bookIndex: input.bookIndex,
+            docId: input.docId,
+            keys,
+            seeds,
+            excludeInfers,
+            queryKey: turnQueryKey,
+            onProgress: input.onProgress,
+          })
+          parts.push(main.part)
+          notes.push(main.note)
+          continue
+        }
       }
 
+      // 首次 infer（无先验 ι）
       const main = await runMainInferAndSettle({
         pkg,
         bookIndex: input.bookIndex,
@@ -1136,6 +1201,10 @@ export async function dispatchLetterDesk(input: {
       qNow: pkg.question,
       seeds,
       keys,
+      decideCritiqueHint:
+        pkg.job === 'decide'
+          ? pkg.decideCritiqueHint || seeds[0]?.decideCritiqueHint
+          : undefined,
     })
     notes.push(win.note)
     input.onProgress?.(`写信台 · ${pkg.job} · LLM…`)

@@ -25,6 +25,10 @@ import type {
   KeyIncrementStatusRow,
   StatusJob,
 } from './keyIncrementStatus'
+import {
+  listQueryFamilyKeys,
+  listQuerySelfAndAncestors as lineageSelfAndAncestors,
+} from '../arch/queryLineage'
 
 export type KeyKind =
   | 'query'
@@ -213,6 +217,8 @@ export interface LetterDeskPackage {
   excludeInferKeys?: string[]
   /** decide：只压这些 briefKey（续滚）；缺省则 seed+同 Q 历史 */
   onlyBriefKeys?: string[]
+  /** 监督预测轨：decide 窗内的策略尸检提示（迭代策略，非直接 seedRange） */
+  decideCritiqueHint?: string
 }
 
 /** 意图路由沿革 · 台侧记录（≠ 注意力窗 I/O） */
@@ -305,6 +311,11 @@ interface AttentionIoState {
   queryKeyToBriefKeys: Record<string, string[]>
   /** 已落账 queryKey → 问原文（仅路径回指后） */
   settledQueries: Record<string, string>
+  /**
+   * 深化谱系：childQueryKey → parentQueryKey。
+   * 无条目 = 根问（完全换问 / 首问）；有父 = 深化子问。
+   */
+  queryParentOf: Record<string, string>
   /** 问句正文指纹 → 最近一次 queryKey（副索引，不当门牌） */
   questionFingerprintToQueryKey: Record<string, string>
   /** decide 落账的 prospect（挂 briefKey） */
@@ -356,12 +367,24 @@ interface AttentionIoState {
   /** 未读 → 尚未处理 */
   listKeysUnread: (job?: StatusJob) => string[]
   /**
-   * 本问 queryKey：同文（规范化后）复用已有 qk；否则 settle 新铸。
+   * 本问 queryKey：同文（规范化后）复用已有 qk；否则 settle 新铸为**根**（无父）。
    * 不满意某环 → 只重做该环，不另开 qk。
    */
   ensureQueryKey: (question: string) => string
   /** 只查不铸：同文已有则返回 qk，否则 null */
   findQueryKeyForQuestion: (question: string) => string | null
+  /**
+   * 深化原问：铸（或复用同文）子 queryKey，挂 parent；继承父链 brief 挂靠。
+   * 同文已是该父之子 → 复用；同文等于父原文 → 返回父（未深化）。
+   */
+  ensureDeepenedQueryKey: (input: {
+    parentQueryKey: string
+    question: string
+  }) => string
+  getQueryParent: (queryKey: string) => string | null
+  listQueryFamily: (queryKey: string) => string[]
+  /** 自身 + 祖先（深化继承 prospect/path） */
+  listQuerySelfAndAncestors: (queryKey: string) => string[]
   pushPeekStep: (input: {
     question: string
     items: Array<{
@@ -578,6 +601,7 @@ export const useAttentionIo = create<AttentionIoState>((set, get) => ({
   questionToBriefKeys: {},
   queryKeyToBriefKeys: {},
   settledQueries: {},
+  queryParentOf: {},
   questionFingerprintToQueryKey: {},
   prospects: [],
   paths: [],
@@ -590,6 +614,17 @@ export const useAttentionIo = create<AttentionIoState>((set, get) => ({
 
   findQueryKeyForQuestion: (question) =>
     latestQueryKeyForQuestion(get().settledQueries, question),
+
+  getQueryParent: (queryKey) => {
+    const p = get().queryParentOf[queryKey.trim()]
+    return p?.trim() || null
+  },
+
+  listQueryFamily: (queryKey) =>
+    listQueryFamilyKeys(get().queryParentOf, queryKey),
+
+  listQuerySelfAndAncestors: (queryKey) =>
+    lineageSelfAndAncestors(get().queryParentOf, queryKey),
 
   ensureQueryKey: (question) => {
     const q = normalizeQuestionText(question)
@@ -618,6 +653,73 @@ export const useAttentionIo = create<AttentionIoState>((set, get) => ({
         ...s.questionFingerprintToQueryKey,
         [fp]: queryKey,
       },
+      // 根问：不写 queryParentOf
+    }))
+    return queryKey
+  },
+
+  ensureDeepenedQueryKey: ({ parentQueryKey, question }) => {
+    const parent = parentQueryKey.trim()
+    const q = normalizeQuestionText(question)
+    if (!parent || get().settledQueries[parent] == null) {
+      return get().ensureQueryKey(q || question)
+    }
+    const parentText = normalizeQuestionText(get().settledQueries[parent] ?? '')
+    if (!q || q === parentText) return parent
+
+    const existing = latestQueryKeyForQuestion(get().settledQueries, q)
+    if (existing) {
+      set((s) => {
+        if (s.queryParentOf[existing] === parent) return s
+        return {
+          queryParentOf: { ...s.queryParentOf, [existing]: parent },
+        }
+      })
+      const inheritFrom = lineageSelfAndAncestors(get().queryParentOf, parent)
+      const briefs = new Set<string>()
+      const map = get().queryKeyToBriefKeys
+      for (const k of [parent, ...inheritFrom]) {
+        for (const b of map[k] ?? []) briefs.add(b)
+      }
+      if (briefs.size > 0) {
+        set((s) => ({
+          queryKeyToBriefKeys: {
+            ...s.queryKeyToBriefKeys,
+            [existing]: [
+              ...new Set([
+                ...(s.queryKeyToBriefKeys[existing] ?? []),
+                ...briefs,
+              ]),
+            ],
+          },
+        }))
+      }
+      return existing
+    }
+
+    const { queryKey } = mintQueryKey()
+    const fp = contentFingerprint(q)
+    const inheritFrom = lineageSelfAndAncestors(get().queryParentOf, parent)
+    const briefs = new Set<string>()
+    const map = get().queryKeyToBriefKeys
+    for (const k of [parent, ...inheritFrom]) {
+      for (const b of map[k] ?? []) briefs.add(b)
+    }
+    set((s) => ({
+      settledQueries: { ...s.settledQueries, [queryKey]: q },
+      queryParentOf: { ...s.queryParentOf, [queryKey]: parent },
+      questionFingerprintToQueryKey: {
+        ...s.questionFingerprintToQueryKey,
+        [fp]: queryKey,
+      },
+      queryKeyToBriefKeys:
+        briefs.size > 0
+          ? {
+              ...s.queryKeyToBriefKeys,
+              [queryKey]: [...briefs],
+            }
+          : s.queryKeyToBriefKeys,
+      lastStatus: `深化问 · child=${queryKey} ← parent=${parent}`,
     }))
     return queryKey
   },
@@ -1225,20 +1327,23 @@ export const useAttentionIo = create<AttentionIoState>((set, get) => ({
   },
 
   beginPendingPathMatch: ({ queryKey, question, inferKeys }) => {
+    // 深化子问可继承父链 prospect（跳过 decide 时本 qk 尚无 prospect）
+    const family = new Set(get().listQuerySelfAndAncestors(queryKey))
     const prospects = get()
-      .prospects.filter((p) => p.queryKey === queryKey)
+      .prospects.filter((p) => family.has(p.queryKey))
       .map((p) => p.prospectKey)
     const pending: PendingPathMatch = {
       queryKey,
       question: question.trim(),
       inferKeys: [...new Set(inferKeys.map((k) => k.trim()).filter(Boolean))],
-      prospectKeys: prospects,
+      prospectKeys: [...new Set(prospects)],
       createdAt: Date.now(),
     }
     set({
       pendingPathMatch: pending,
       lastStatus:
-        `等待用户匹配 path · qk=${queryKey} · ι×${pending.inferKeys.length} · prospect×${pending.prospectKeys.length}`,
+        `等待用户匹配 path · qk=${queryKey} · ι×${pending.inferKeys.length} · prospect×${pending.prospectKeys.length}` +
+        (family.size > 1 ? ` · 含父链 prospect` : ''),
       graphOpen: true,
     })
     return pending
@@ -1262,7 +1367,9 @@ export const useAttentionIo = create<AttentionIoState>((set, get) => ({
     const allowedPk = new Set(
       pending?.prospectKeys ??
         get()
-          .prospects.filter((p) => p.queryKey === queryKey)
+          .prospects.filter((p) =>
+            get().listQuerySelfAndAncestors(queryKey).includes(p.queryKey),
+          )
           .map((p) => p.prospectKey),
     )
     const clean = matches.filter(
@@ -1613,6 +1720,7 @@ export const useAttentionIo = create<AttentionIoState>((set, get) => ({
       questionToBriefKeys: {},
       queryKeyToBriefKeys: {},
       settledQueries: {},
+      queryParentOf: {},
       questionFingerprintToQueryKey: {},
       prospects: [],
       paths: [],

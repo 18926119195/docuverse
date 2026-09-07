@@ -13,7 +13,7 @@ import { useAttentionIo, type LetterDeskPackage } from './attentionIoStore'
 import { mapBriefToBook, listAllSettledBriefs } from './masterTableMap'
 import { expandIncrementSlots, statusAllowsMint } from './settleMint'
 import { extractJsonObject, parseQueryNeighbours } from './inferPath'
-import { resolveFirstStepBranch, listSettledQueryEntries } from './deskEntryGate'
+import { resolveFirstStepBranch, listHistoricQueryEntriesForNeighbour } from './deskEntryGate'
 import {
   expandSeedRangeToBookKeys,
   fallbackSeedRange,
@@ -194,9 +194,12 @@ async function runStageA(input: {
   raw: string
   note: string
 }> {
-  const entries = listSettledQueryEntries()
+  const turnQk =
+    useAttentionIo.getState().findQueryKeyForQuestion(input.question) ||
+    useAttentionIo.getState().ensureQueryKey(input.question)
+  const entries = listHistoricQueryEntriesForNeighbour(turnQk)
   if (entries.length === 0) {
-    return { neighbours: [], raw: '', note: '阶段A跳过·无 queryKey' }
+    return { neighbours: [], raw: '', note: '阶段A跳过·无历史 queryKey（已排除 Q_now）' }
   }
   const pkg: LetterDeskPackage = {
     id: sid(),
@@ -410,7 +413,9 @@ export async function runAutoFlow(input: {
     notes.push(a.note)
     {
       const { ingestKeyIncrementStatuses } = await import('./attentionArrival')
-      const historic = listSettledQueryEntries().map((e) => e.queryKey)
+      const historic = listHistoricQueryEntriesForNeighbour(turnQueryKey).map(
+        (e) => e.queryKey,
+      )
       ingestKeyIncrementStatuses({
         job: 'query',
         llmText: a.raw,
@@ -502,6 +507,129 @@ export async function runAutoFlow(input: {
   }
 
   attachBriefsToQuestion(q, sealedBriefKeys, turnQueryKey)
+
+  // 深化子问：父链已有 prospect、本问尚无 → 跳过 decide，材料继承后直开 infer
+  const stLine = useAttentionIo.getState()
+  const parentQk = stLine.getQueryParent(turnQueryKey)
+  const familyQks = new Set(stLine.listQuerySelfAndAncestors(turnQueryKey))
+  const parentProspects = stLine.prospects.filter((p) => familyQks.has(p.queryKey))
+  const ownProspects = stLine.prospects.filter((p) => p.queryKey === turnQueryKey)
+  const deepenSkipDecide =
+    Boolean(parentQk) && parentProspects.length > 0 && ownProspects.length === 0
+
+  if (deepenSkipDecide) {
+    notes.push(
+      `深化·跳过decide · parent=${parentQk} · 继承prospect×${parentProspects.length}`,
+    )
+    parts.push(
+      `### 自动流 · 深化继承\n跳过 decide；沿用父链 prospect×${parentProspects.length}；infer 用深化 Q 控方向`,
+    )
+    // 递送用父链充分 brief（已在 sealedBriefKeys / 继承）
+    const briefKeys = [
+      ...new Set(
+        parentProspects
+          .map((p) => p.briefKey)
+          .filter(Boolean),
+      ),
+    ]
+    if (briefKeys.length === 0) {
+      return {
+        ok: false,
+        answer: parts.join('\n\n'),
+        note: `自动流中止 · 深化无父 prospect brief · ${notes.join(' → ')}`,
+      }
+    }
+    sealedBriefKeys = [...new Set([...sealedBriefKeys, ...briefKeys])]
+
+    input.onProgress?.('自动流 · 深化 · 直开 infer…')
+    const bookKeys: string[] = []
+    for (const bk of briefKeys) {
+      const hit = mapBriefToBook(docId, bk)
+      if (hit?.bookKey && !bookKeys.includes(hit.bookKey)) bookKeys.push(hit.bookKey)
+    }
+    if (bookKeys.length === 0) {
+      return {
+        ok: false,
+        answer: parts.join('\n\n'),
+        note: `自动流中止 · 深化 brief 无法映射 bookKey · ${notes.join(' → ')}`,
+      }
+    }
+    const mainPkg: LetterDeskPackage = {
+      id: sid(),
+      edgeId: `${stepId || 'infer_deepen'}_${bookKeys[0]}`,
+      bookKey: bookKeys[0]!,
+      briefKey: briefKeys[0] || '',
+      question: q,
+      job: 'infer',
+      versionIndex: 0,
+      createdAt: Date.now(),
+    }
+    const mainRes = await askDeepSeekWithLetterDesk({
+      question: q,
+      packages: [mainPkg],
+      bookIndex: input.bookIndex,
+      docId,
+      onProgress: input.onProgress,
+      turnQueryKey,
+    })
+    parts.push(mainRes.answer || '### infer · （空）')
+    notes.push(mainRes.note)
+    const mainFailed =
+      !mainRes.ok ||
+      /空内容|失败|HTTP|无 choices|请求失败/.test(mainRes.note)
+    if (mainFailed) {
+      deskPromptSafety(
+        `写信台 · 深化 infer 未写出（${mainRes.note}）。可钉窗重跑或改深化问法。`,
+      )
+      return {
+        ok: false,
+        answer: parts.join('\n\n'),
+        note: `自动流 · 深化 infer 失败 · ${notes.join(' → ')}`,
+      }
+    }
+    deskMonitorAttentionArrival({
+      job: 'infer',
+      llmText: mainRes.answer,
+      windowKeys: bookKeys,
+    })
+    const pending = useAttentionIo.getState().pendingPathMatch
+    const userPaths = useAttentionIo
+      .getState()
+      .listPathsForQueryKey(turnQueryKey)
+      .filter((p) => p.matchMode === 'user')
+    if (userPaths.length === 0 && pending) {
+      useAttentionIo.getState().setDeskPrompt(
+        `写信台 · 深化后请匹配 path（prospect 可来自父链）：` +
+          ` qk=${pending.queryKey} · ι×${pending.inferKeys.length} · prospect×${pending.prospectKeys.length}`,
+      )
+      notes.push('等待用户 path 匹配（深化）')
+      return {
+        ok: true,
+        answer:
+          parts.join('\n\n') +
+          `\n\n### 等待用户匹配 path（深化）\n` +
+          `queryKey=\`${pending.queryKey}\`\n` +
+          `inferKeys: ${pending.inferKeys.map((k) => `\`${k}\``).join(', ')}\n` +
+          `prospectKeys: ${pending.prospectKeys.map((k) => `\`${k}\``).join(', ')}`,
+        note: `自动流 · ${notes.join(' → ')}`,
+      }
+    }
+    const pathReturn = formatDirectedPathIncrementReturn({
+      question: q,
+      hopOutputs: hopsFromAnswerParts(parts),
+      mode: 'auto',
+      queryKey: turnQueryKey,
+    })
+    useAttentionIo
+      .getState()
+      .setLastStatus(`自动流完成 · ${notes.join(' → ')}`)
+    useAttentionIo.getState().clearDeskPrompt()
+    return {
+      ok: true,
+      answer: pathReturn,
+      note: `自动流 · ${notes.join(' → ')}`,
+    }
+  }
 
   // 三态：decide 优先 sufficient ∪ unread；无状态则全量
   {

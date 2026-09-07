@@ -385,6 +385,21 @@ export {
   runComposerTurn,
 } from './intentDeskRouter'
 export {
+  gatherCritiqueLedger,
+  runSuperviseCritique,
+  priorInferKeysForQuery,
+  heuristicCritique,
+} from './superviseCritique'
+export type {
+  CritiqueFault,
+  CritiqueDecision,
+  CritiqueAutopsy,
+  CritiqueLedger,
+  PredictSub,
+  ReasonSub,
+} from './superviseCritique'
+export { executeSuperviseCritique } from './superviseCritiqueExec'
+export {
   inspectQueryGap,
   gapToDeskPackages,
   formatGapLedgerForIntent,
@@ -400,7 +415,15 @@ export {
   resolveFirstStepBranch,
   deskHasSettledQueryKeys,
   listSettledQueryEntries,
+  listHistoricQueryEntriesForNeighbour,
 } from './deskEntryGate'
+export {
+  getQueryRoot,
+  listQueryAncestors,
+  listQueryChildren,
+  listQueryFamilyKeys,
+  listQuerySelfAndAncestors,
+} from '../arch/queryLineage'
 export {
   lookupContract,
   DESK_CONTRACTS,
