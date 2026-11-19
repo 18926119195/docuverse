@@ -5,7 +5,6 @@
 
 import type { BookIndex } from './pipelineA'
 import type { AChunkSource, PlaceFaces, PlaceKind } from './types'
-import { facesToReadout } from './intrinsicKey'
 
 /** v2: slot doorplate key* (doc|slot|p|k) + slotK on atoms */
 const STORAGE_PREFIX = 'docuverse.a1.v2:'

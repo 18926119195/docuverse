@@ -99,12 +99,11 @@ export async function executeRetrieve(input: {
       question,
       role: 'draft',
       funnelStage: 'removed',
-      note: '检索漏斗已删除；仅 BM25 草稿',
     },
     outputsRef: {
       candidateKeys: draftKeys,
       draftKeys,
-      roleNote: [FANOUT_ROLE_NOTE.draft, 'BM25草稿（漏斗已废）']
+      roleNote: [FANOUT_ROLE_NOTE.draft, 'BM25草稿（漏斗已废）· 检索漏斗已删除；仅 BM25 草稿']
         .filter(Boolean)
         .join(' · '),
     },
