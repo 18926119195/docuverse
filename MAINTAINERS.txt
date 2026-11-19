@@ -1,8 +1,8 @@
 docuverse｜问线台账、分工与双轨监督
 开发时间线（原话、实现提交、源码行号和验证）见同目录 DEVELOPMENT_HISTORY.txt。
-https://github.com/18926119195/docuverse/blob/codex/repository-cleanup/DEVELOPMENT_HISTORY.txt
+https://github.com/18926119195/docuverse/blob/main/DEVELOPMENT_HISTORY.txt
 核验 Git 提交 9d263db3b875ff4fc6dc3039e5c3415a42eaeca0
-协作总导航 https://github.com/18926119195/docuverse/blob/codex/repository-cleanup/MAINTAINERS.txt
+协作总导航 https://github.com/18926119195/docuverse/blob/main/MAINTAINERS.txt
 
 这个库在开发什么
 应用在仓库根。开发主线从一次推理推进到按 queryKey 组织工种递送、实例键、path、复用和监督。源码有 predict 与 reason_narrow 分派、改问以及旧 path 排除。不同工种的模型回包需要分别验证。
@@ -28,22 +28,22 @@ https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42
 
 选库菜单
 1. hypertext-interact — A1 证据约束的交互原型
-   https://github.com/18926119195/hypertext-interact/blob/codex/repository-cleanup/MAINTAINERS.txt
+   https://github.com/18926119195/hypertext-interact/blob/main/MAINTAINERS.txt
    核验快照 https://github.com/18926119195/hypertext-interact/tree/d4c188a541c758c4ba691ae7088dc82b87f56269
 2. diergbanben- — A/B 证据对照演示
-   https://github.com/18926119195/diergbanben-/blob/codex/repository-cleanup/MAINTAINERS.txt
+   https://github.com/18926119195/diergbanben-/blob/main/MAINTAINERS.txt
    核验快照 https://github.com/18926119195/diergbanben-/tree/08a712e2002f1368a883009eb104ee3ad2e4cd79
 3. diergbanben-fanout — 写信台、运动计划与 infer-ops 的旁路实验
-   https://github.com/18926119195/diergbanben-fanout/blob/codex/repository-cleanup/MAINTAINERS.txt
+   https://github.com/18926119195/diergbanben-fanout/blob/main/MAINTAINERS.txt
    核验快照 https://github.com/18926119195/diergbanben-fanout/tree/b5495d32fd083acae9f239e694e7a585723911d0
 4. docuverse — 问线台账、分工与双轨监督
-   https://github.com/18926119195/docuverse/blob/codex/repository-cleanup/MAINTAINERS.txt
+   https://github.com/18926119195/docuverse/blob/main/MAINTAINERS.txt
    核验快照 https://github.com/18926119195/docuverse/tree/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0
 5. docuverse-kanzheli — 保留 peek 的 OCR 和书内实体对照
-   https://github.com/18926119195/docuverse-kanzheli/blob/codex/repository-cleanup/MAINTAINERS.txt
+   https://github.com/18926119195/docuverse-kanzheli/blob/main/MAINTAINERS.txt
    核验快照 https://github.com/18926119195/docuverse-kanzheli/tree/040a9bb1a82cbdd408893510e937afcf157df931
 6. docuverse-shanchule-peek — 无 peek 自动流与名词表实验
-   https://github.com/18926119195/docuverse-shanchule-peek/blob/codex/repository-cleanup/MAINTAINERS.txt
+   https://github.com/18926119195/docuverse-shanchule-peek/blob/experiment/no-peek-prospect-as-index/MAINTAINERS.txt
    核验快照 https://github.com/18926119195/docuverse-shanchule-peek/tree/b85b8399f8a23fc57b66a02d5c4ab3023ffba364
 
 版本关系与证据
@@ -78,22 +78,22 @@ https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42
 
 跨库开发历程
 hypertext-interact
-  https://github.com/18926119195/hypertext-interact/blob/codex/repository-cleanup/DEVELOPMENT_HISTORY.txt
+  https://github.com/18926119195/hypertext-interact/blob/main/DEVELOPMENT_HISTORY.txt
   https://github.com/18926119195/hypertext-interact/pull/1
 diergbanben-
-  https://github.com/18926119195/diergbanben-/blob/codex/repository-cleanup/DEVELOPMENT_HISTORY.txt
+  https://github.com/18926119195/diergbanben-/blob/main/DEVELOPMENT_HISTORY.txt
   https://github.com/18926119195/diergbanben-/pull/1
 diergbanben-fanout
-  https://github.com/18926119195/diergbanben-fanout/blob/codex/repository-cleanup/DEVELOPMENT_HISTORY.txt
+  https://github.com/18926119195/diergbanben-fanout/blob/main/DEVELOPMENT_HISTORY.txt
   https://github.com/18926119195/diergbanben-fanout/pull/1
 docuverse
-  https://github.com/18926119195/docuverse/blob/codex/repository-cleanup/DEVELOPMENT_HISTORY.txt
+  https://github.com/18926119195/docuverse/blob/main/DEVELOPMENT_HISTORY.txt
   https://github.com/18926119195/docuverse/pull/1
 docuverse-kanzheli
-  https://github.com/18926119195/docuverse-kanzheli/blob/codex/repository-cleanup/DEVELOPMENT_HISTORY.txt
+  https://github.com/18926119195/docuverse-kanzheli/blob/main/DEVELOPMENT_HISTORY.txt
   https://github.com/18926119195/docuverse-kanzheli/pull/1
 docuverse-shanchule-peek
-  https://github.com/18926119195/docuverse-shanchule-peek/blob/codex/repository-cleanup/DEVELOPMENT_HISTORY.txt
+  https://github.com/18926119195/docuverse-shanchule-peek/blob/experiment/no-peek-prospect-as-index/DEVELOPMENT_HISTORY.txt
   https://github.com/18926119195/docuverse-shanchule-peek/pull/1
 
-协作者从时间线的菜单编号认领任务。PR 写明编号、基线提交、正常调用入口和可复跑证据。每次有新决定，保留原发言定位、代码提交和测试结果，再补时间线。现有整理尚在 PR；合并后从各库根目录读取同名文件。
+协作者从时间线的菜单编号认领任务。PR 写明编号、基线提交、正常调用入口和可复跑证据。每次有新决定，保留原发言定位、代码提交和测试结果，再补时间线。从各库目标分支的根目录读取同名文件。PR 链接保留合并历史。
