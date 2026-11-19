@@ -1,0 +1,13 @@
+文件路径索引
+
+整理前路径与 Git 对象可从 https://github.com/18926119195/docuverse/tree/64206c4faf5c1725d0de2d9e31c50b82a07ba834 回查。
+图标入口使用现有 public/favicon.svg，应用根目录和部署根目录保持原布局。
+
+原样移动
+
+src/assets/hero.png
+  docs/archive/ui-assets/hero.png
+  Git blob 02251f4b956c55af2d76fd0788124d7eee2b45eb
+src/assets/vite.svg
+  docs/archive/ui-assets/vite.svg
+  Git blob 5101b674df391399da71c767aa5c976426c9dc7a

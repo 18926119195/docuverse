@@ -55,8 +55,6 @@ export function KeyHashGraph() {
       selectedQueryKey,
     ],
   )
-  const hasFocus = focus.hasFocus
-
   if (!graphOpen) {
     return (
       <button

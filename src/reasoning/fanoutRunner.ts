@@ -19,10 +19,7 @@ import {
   type LetterLockState,
 } from './letterPackages'
 import type { FanoutInferUnit } from './fanoutCompose'
-import {
-  defaultComposePolicy,
-  type ComposePolicy,
-} from './composePolicy'
+import type { ComposePolicy } from './composePolicy'
 import { FANOUT_ROLE_NOTE } from './fanoutRoles'
 import {
   buildPathMarker,
@@ -567,22 +564,6 @@ function slotsOf(
       : b.bbox,
     excerpt: text.slice(0, 96),
   }))
-}
-
-function resolvePolicy(options: FanoutRunOptions): ComposePolicy {
-  const policy: ComposePolicy = {
-    ...defaultComposePolicy(),
-    ...options.policy,
-  }
-  if (options.policy == null) {
-    if (typeof options.includeFine === 'boolean')
-      policy.includeFine = options.includeFine
-    if (typeof options.includeWindow === 'boolean')
-      policy.includeWindow = options.includeWindow
-    if (typeof options.windowRadius === 'number')
-      policy.windowRadius = options.windowRadius
-  }
-  return policy
 }
 
 /**

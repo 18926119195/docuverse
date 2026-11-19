@@ -146,7 +146,7 @@ export function DeskDeliveryArrows() {
 
     for (const d of deskDeliveries) {
       if (inferByKey.has(d.toKey) || briefByKey.has(d.toKey)) continue
-      if (d.job === 'peek' || d.job === 'decide' || d.job === 'infer' || d.job === 'mainInfer') continue
+      if (['peek', 'decide', 'infer', 'mainInfer'].includes(d.job)) continue
       let toPos = queryPos.get(d.toKey) ?? bookPos.get(d.toKey) ?? null
       if (!toPos && docId) {
         const hit = mapBriefToBook(docId, d.toKey)

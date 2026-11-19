@@ -8,10 +8,6 @@ import type { EmphasisEdge, PagePoint, RegionSelector } from '../data/emphasis'
 import type { OcrPageResult } from '../data/ocrService'
 import type { PageDocument, PageTextChunk } from '../zigzag/types'
 import { facesToReadout } from './intrinsicKey'
-import {
-  atomSearchText,
-  isRetrievableAtom,
-} from './hybridRetrieve'
 import { recallCandidatesByBm25 } from './retrieveBm25'
 import { fullSlotMember, isOpaqueHandle, type SlotMemberRef } from './ocrSlot'
 import { protocolMintKey } from './protocolClient'

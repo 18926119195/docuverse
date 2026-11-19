@@ -151,7 +151,7 @@ export async function executeInstructionCompose(input: {
     premiseKeys: allMembers,
     inputsRef: {
       question: input.question,
-      sourceKeys: draftKeys,
+      sourceKeys: [...draftKeys],
       role: 'letter',
       composeMode: input.spec?.mode ?? 'top_singles',
     },

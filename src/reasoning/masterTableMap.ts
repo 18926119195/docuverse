@@ -94,7 +94,7 @@ export function listAllSettledBriefs(docId: string): Array<{
     brief: string
     isHead: boolean
   }> = []
-  for (const [bookKey, entry] of Object.entries(store.byKey)) {
+  for (const bookKey of Object.keys(store.byKey)) {
     for (const v of listBriefVersionsOnDoor(docId, bookKey)) {
       out.push({
         bookKey,

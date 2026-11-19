@@ -84,7 +84,7 @@ export function inspectQueryGap(input: {
   const prospects = s.prospects.filter((p) => p.queryKey === qk)
   const inferEdges = s.inferEdges.filter((e) => e.queryKey === qk)
   const paths = s.paths.filter((p) => p.queryKey === qk)
-  const reuseLinks = s.queryReuseLinks.filter((l) => l.queryKey === qk)
+  const reuseLinks = s.queryReuseLinks.filter((l) => l.fromQueryKey === qk)
   const pending = s.pendingPathMatch
 
   if (historicOthers.length > 0) {

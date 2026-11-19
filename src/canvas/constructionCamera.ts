@@ -7,6 +7,7 @@ import {
 } from '../data/emphasis'
 import {
   emphasisSurfaceWorld,
+  geodesicMidOutward,
   layerPointOnOuterSphere,
   type AttentionShellKind,
 } from './surfaceGeometry'
