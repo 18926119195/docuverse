@@ -1,4 +1,6 @@
 docuverse｜问线台账、分工与双轨监督
+开发时间线（原话、实现提交、源码行号和验证）见同目录 DEVELOPMENT_HISTORY.txt。
+https://github.com/18926119195/docuverse/blob/codex/repository-cleanup/DEVELOPMENT_HISTORY.txt
 核验 Git 提交 9d263db3b875ff4fc6dc3039e5c3415a42eaeca0
 协作总导航 https://github.com/18926119195/docuverse/blob/codex/repository-cleanup/MAINTAINERS.txt
 
@@ -73,3 +75,25 @@ https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42
 4. 暂时以本文件作为跨库导航。保留六个运行树各自的部署、提交和聊天源；跨库共用模块一旦有稳定接口及相同夹具，再单独评估提取。当前每库只增加一份维护入口，无目录迁移或运行行为改动。
 
 文件整理与旧路径映射见 docs/archive/PATHS.txt。
+
+跨库开发历程
+hypertext-interact
+  https://github.com/18926119195/hypertext-interact/blob/codex/repository-cleanup/DEVELOPMENT_HISTORY.txt
+  https://github.com/18926119195/hypertext-interact/pull/1
+diergbanben-
+  https://github.com/18926119195/diergbanben-/blob/codex/repository-cleanup/DEVELOPMENT_HISTORY.txt
+  https://github.com/18926119195/diergbanben-/pull/1
+diergbanben-fanout
+  https://github.com/18926119195/diergbanben-fanout/blob/codex/repository-cleanup/DEVELOPMENT_HISTORY.txt
+  https://github.com/18926119195/diergbanben-fanout/pull/1
+docuverse
+  https://github.com/18926119195/docuverse/blob/codex/repository-cleanup/DEVELOPMENT_HISTORY.txt
+  https://github.com/18926119195/docuverse/pull/1
+docuverse-kanzheli
+  https://github.com/18926119195/docuverse-kanzheli/blob/codex/repository-cleanup/DEVELOPMENT_HISTORY.txt
+  https://github.com/18926119195/docuverse-kanzheli/pull/1
+docuverse-shanchule-peek
+  https://github.com/18926119195/docuverse-shanchule-peek/blob/codex/repository-cleanup/DEVELOPMENT_HISTORY.txt
+  https://github.com/18926119195/docuverse-shanchule-peek/pull/1
+
+协作者从时间线的菜单编号认领任务。PR 写明编号、基线提交、正常调用入口和可复跑证据。每次有新决定，保留原发言定位、代码提交和测试结果，再补时间线。现有整理尚在 PR；合并后从各库根目录读取同名文件。

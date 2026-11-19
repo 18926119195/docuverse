@@ -1,0 +1,109 @@
+Docuverse 开发沿革与贡献入口
+日期均使用北京时间。会话时间来自原件时间戳，代码时间来自 Git。原件行可回到完整上下文。各历史节点以列出的提交为准。
+
+菜单
+DV-01  从书页坐标到按槽登记
+DV-02  同问复键、空位导航与 BM25
+DV-03  收拢复用失败后的材料排除
+DV-04  监督按预测和推理两轨调度
+DV-05  区分换问、坏路径与文本重复
+DV-06  恢复构建、修正台账与三态、整理目录
+RUN  当前运行入口与协作步骤
+
+DV-01｜2026-09-03 → 09-04 ｜从书页坐标到按槽登记
+用户原句（原文摘句，Thursday, Sep 3, 2026, 10:27 AM (UTC+8)）
+「内禀性坐标其实是一个时空坐标，某本书某页就是空间性的，某个职能负责者的某个步骤就是时间性的。」
+  原件
+  https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/docs/chat-archive/2026-09-03-architecture-align.jsonl#L1
+用户原句（原文摘句，Friday, Sep 4, 2026, 11:00 AM (UTC+8)）
+「一定要确保被新造的key一定是只有一个，不能够本来应该是被造两个key的内容，被合在一个key里面了」
+  原件
+  https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/docs/chat-archive/2026-09-04-architecture-continue.jsonl#L67
+09-03 的 master 仍有推理边和落账序号。09-04 的架构提交把实例 key 派生收进 settleMint，按输入允许集合逐个核验 prospect 行，并在台账登记。正文指纹作辅助。
+  src/reasoning/attentionIoStore.ts
+  https://github.com/18926119195/docuverse/blob/bdd46a7056cac8d0d9475004cd5bafef88a931bc/src/reasoning/attentionIoStore.ts#L50-L89
+  src/arch/settleMint.ts
+  https://github.com/18926119195/docuverse/blob/463729c1b0c4b907f9a0148a00ce7aaed2cce635/src/arch/settleMint.ts#L37-L79
+  src/reasoning/attentionIoStore.ts
+  https://github.com/18926119195/docuverse/blob/463729c1b0c4b907f9a0148a00ce7aaed2cce635/src/reasoning/attentionIoStore.ts#L1070-L1118
+
+DV-02｜2026-09-04 ｜同问复键、空位导航与 BM25
+用户原句（原文摘句，Friday, Sep 4, 2026, 10:53 AM (UTC+8)）
+「是现在我们根本就不用检索漏斗吧？」
+  原件
+  https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/docs/chat-archive/2026-09-04-architecture-continue.jsonl#L56
+同文问先查已登记 queryKey，指纹命中再对照登记的文本。空位导航读取已落账事实。检索召回走 BM25。仓库后续仍留有用于审计的手动 embedding 入口，普通检索链应从调用处确认。
+  src/reasoning/attentionIoStore.ts
+  https://github.com/18926119195/docuverse/blob/463729c1b0c4b907f9a0148a00ce7aaed2cce635/src/reasoning/attentionIoStore.ts#L594-L619
+  src/arch/gapNavigation.ts
+  https://github.com/18926119195/docuverse/blob/463729c1b0c4b907f9a0148a00ce7aaed2cce635/src/arch/gapNavigation.ts#L70-L118
+  src/reasoning/retrieveBm25.ts
+  https://github.com/18926119195/docuverse/blob/463729c1b0c4b907f9a0148a00ce7aaed2cce635/src/reasoning/retrieveBm25.ts#L19-L85
+  src/ui/ReasoningPilotPanel.tsx
+  https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/src/ui/ReasoningPilotPanel.tsx#L166-L178
+
+DV-03｜2026-09-07 13:30 ｜收拢复用失败后的材料排除
+用户原句（原文摘句，Monday, Sep 7, 2026, 12:45 PM (UTC+8)）
+「我认为就是这个，就是排除历史query，还有就是排除历史的infer是否有这些呢」
+  原件
+  https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/docs/chat-archive/2026-09-07-letter-desk-supervise.jsonl#L31
+用户原句（原文摘句，Monday, Sep 7, 2026, 12:46 PM (UTC+8)）
+「按照你这个去改现码」
+  原件
+  https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/docs/chat-archive/2026-09-07-letter-desk-supervise.jsonl#L35
+该版的 reuse 返回排除 brief，autoFlow 在 decide 前取用。infer 调度落回输入证据和当前问，无需把历史问文当作排除正文。两条历史来源在 12:45 至 12:46 连读，可区分当时发问与随后确认的取舍。
+  src/reasoning/autoFlow.ts
+  https://github.com/18926119195/docuverse/blob/b59600ec31e2800362d6dc60e90e36a631523d61/src/reasoning/autoFlow.ts#L466-L490
+  src/reasoning/letterDeskDispatch.ts
+  https://github.com/18926119195/docuverse/blob/b59600ec31e2800362d6dc60e90e36a631523d61/src/reasoning/letterDeskDispatch.ts#L1094-L1146
+
+DV-04｜2026-09-07 14:44 ｜监督按预测和推理两轨调度
+用户原句（原文摘句，Monday, Sep 7, 2026, 2:00 PM (UTC+8)）
+「也就是说推理其实应该局限在就是材料已经够了，只是方向的问题，那么就不应该过一遍decide的了」
+  原件
+  https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/docs/chat-archive/2026-09-07-letter-desk-supervise.jsonl#L116
+监督先产生结构化归因，再由执行器分派。狭义推理走 infer，继续使用留存材料，并要求有旧 inferKey 可排除。选择深化时登记子 queryKey。预测轨可进入 decide。
+  src/reasoning/superviseCritique.ts
+  https://github.com/18926119195/docuverse/blob/02297aa9d4ced3e2c9b1ff00623816020b9f1520/src/reasoning/superviseCritique.ts#L347-L390
+  src/reasoning/superviseCritiqueExec.ts
+  https://github.com/18926119195/docuverse/blob/02297aa9d4ced3e2c9b1ff00623816020b9f1520/src/reasoning/superviseCritiqueExec.ts#L35-L105
+  src/reasoning/superviseCritiqueExec.ts
+  https://github.com/18926119195/docuverse/blob/02297aa9d4ced3e2c9b1ff00623816020b9f1520/src/reasoning/superviseCritiqueExec.ts#L119-L180
+
+DV-05｜2026-09-07 16:09 ｜区分换问、坏路径与文本重复
+用户原句（原文摘句，Monday, Sep 7, 2026, 3:50 PM (UTC+8)）
+「这个是否会换问题呢？如果不是换问题，难道是排除集吗？」
+  原件
+  https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/docs/chat-archive/2026-09-07-supervise-dual-track.jsonl#L52
+revise_q 按更改后的问题进入标准流程；同问复盘可只禁指定坏 path，并保留其他邻问候选。reframe 通过规范化文本、指纹、片段包含和字符二元组重合拒绝过于相似的 prospect。该规则处理文本相似，真实模型能否正确归因仍待端到端证据。
+  src/reasoning/superviseCritiqueExec.ts
+  https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/src/reasoning/superviseCritiqueExec.ts#L144-L186
+  src/reasoning/letterDeskDispatch.ts
+  https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/src/reasoning/letterDeskDispatch.ts#L615-L655
+  src/reasoning/prospectIsomorph.ts
+  https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/src/reasoning/prospectIsomorph.ts#L35-L54
+
+DV-06｜2026-11-19 ｜恢复构建、修正台账与三态、整理目录
+整理分支用 fromQueryKey 对齐现问的已采纳复用边。三态归一化优先识别“不充分”等否定表达。模型凭据改为只读取服务端 LLM_API_KEY 与 ZHIPU_API_KEY。本地夹具验证 BM25、同问复键、三态、复用空位进展、文本闸和无凭据 Mock。Node 24 / npm 11 的生产构建和 API TS 检查通过，Lint 退出 0 并保留警告。实际模型判断、生产配置与延迟未实测。后续归档两个无现行引用的 UI 资源，恢复首页 favicon 引用。
+  src/arch/gapNavigation.ts
+  https://github.com/18926119195/docuverse/blob/a64af4c60191aae2565aabff7d5f04b539c0d9ea/src/arch/gapNavigation.ts#L79-L113
+  src/arch/keyIncrementStatus.ts
+  https://github.com/18926119195/docuverse/blob/a64af4c60191aae2565aabff7d5f04b539c0d9ea/src/arch/keyIncrementStatus.ts#L37-L56
+  api/_lib/env.ts
+  https://github.com/18926119195/docuverse/blob/a64af4c60191aae2565aabff7d5f04b539c0d9ea/api/_lib/env.ts#L17-L40
+  docs/archive/PATHS.txt
+  https://github.com/18926119195/docuverse/blob/e79f3c1783a57f47cbfdd3c91a7850bcd3764f56/docs/archive/PATHS.txt
+  index.html
+  https://github.com/18926119195/docuverse/blob/e79f3c1783a57f47cbfdd3c91a7850bcd3764f56/index.html#L3-L7
+
+当前运行入口与协作步骤
+以分支 codex/repository-cleanup 的 e79f3c1783a57f47cbfdd3c91a7850bcd3764f56 为本文件核对的整理基线。若修改普通问句，从 src/main.tsx → App → A1ChatDock → runComposerTurn / autoFlow 顺读。若改人工 Fanout，从 FanoutHud 的 prepareLetterDesk 与 executeLetterDesk 顺读。涉及第三方服务查看 .env.example 与本地 Vite 中间件、部署 API；为各自环境提供密钥。
+复现时运行 npm ci、npm run dev。提交前运行 npm run build、npm run lint、npx tsc -p api/tsconfig.json --noEmit。从选定基线开任务分支，一次 PR 对应一个行为变化，正文写明原件路径/行号、实际入口、验证范围及仍待复现行为。发现聊天与代码冲突时，记录两处证据和提交 SHA。新增原件使用 docs/chat-archive，保留消息角色与时间戳。
+  package.json
+  https://github.com/18926119195/docuverse/blob/e79f3c1783a57f47cbfdd3c91a7850bcd3764f56/package.json#L6-L11
+  src/main.tsx
+  https://github.com/18926119195/docuverse/blob/e79f3c1783a57f47cbfdd3c91a7850bcd3764f56/src/main.tsx#L1-L12
+  src/ui/A1ChatDock.tsx
+  https://github.com/18926119195/docuverse/blob/e79f3c1783a57f47cbfdd3c91a7850bcd3764f56/src/ui/A1ChatDock.tsx#L49-L81
+  src/ui/FanoutHud.tsx
+  https://github.com/18926119195/docuverse/blob/e79f3c1783a57f47cbfdd3c91a7850bcd3764f56/src/ui/FanoutHud.tsx#L212-L235
