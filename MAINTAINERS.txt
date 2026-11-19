@@ -1,0 +1,73 @@
+docuverse｜问线台账、分工与双轨监督
+核验 Git 提交 9d263db3b875ff4fc6dc3039e5c3415a42eaeca0
+协作总导航 https://github.com/18926119195/docuverse/blob/codex/repository-cleanup/MAINTAINERS.txt
+
+这个库在开发什么
+应用在仓库根。开发主线从一次推理推进到按 queryKey 组织工种递送、实例键、path、复用和监督。源码有 predict 与 reason_narrow 分派、改问以及旧 path 排除。不同工种的模型回包需要分别验证。
+
+首次阅读的代码入口
+src/reasoning/autoFlow.ts → letterDeskDispatch.ts → attentionIoStore.ts；监督从 superviseCritiqueExec.ts 阅读，实例键从 src/arch/settleMint.ts 阅读。
+https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/src/reasoning/autoFlow.ts#L314
+https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/src/reasoning/attentionIoStore.ts#L1177
+https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/src/reasoning/superviseCritiqueExec.ts#L44
+https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/src/arch/settleMint.ts#L34
+
+相关聊天原件
+用户要求「现在我需要你添加进去的是所有的llm都需要能够对其输出的增量信息对其一一对应的输入key进行三种状态传递给写信台即unread，充分和不充分，方便后面知道递送哪些」
+https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/docs/chat-archive/2026-09-03-architecture-align.jsonl#L66
+双轨监督的原始问题见下方。
+https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/docs/chat-archive/2026-09-07-letter-desk-supervise.jsonl#L49
+
+维护边界和下次接续
+保留为台账与监督基线。下一次改动优先把旧状态、缺状态、明确不充分、拒绝旧 path 和改问分别纳入回归。按实际调用者区分 src/arch 的规则与 src/reasoning 的调度和状态，整理前确认旧导入和台账兼容。
+本文件只依据 Git 提交关系、可定位的聊天原件和源码。候选改动需要以正常入口及复跑证据验收。
+
+六库协作导航
+
+选库菜单
+1. hypertext-interact — A1 证据约束的交互原型
+   https://github.com/18926119195/hypertext-interact/blob/codex/repository-cleanup/MAINTAINERS.txt
+   核验快照 https://github.com/18926119195/hypertext-interact/tree/d4c188a541c758c4ba691ae7088dc82b87f56269
+2. diergbanben- — A/B 证据对照演示
+   https://github.com/18926119195/diergbanben-/blob/codex/repository-cleanup/MAINTAINERS.txt
+   核验快照 https://github.com/18926119195/diergbanben-/tree/08a712e2002f1368a883009eb104ee3ad2e4cd79
+3. diergbanben-fanout — 写信台、运动计划与 infer-ops 的旁路实验
+   https://github.com/18926119195/diergbanben-fanout/blob/codex/repository-cleanup/MAINTAINERS.txt
+   核验快照 https://github.com/18926119195/diergbanben-fanout/tree/b5495d32fd083acae9f239e694e7a585723911d0
+4. docuverse — 问线台账、分工与双轨监督
+   https://github.com/18926119195/docuverse/blob/codex/repository-cleanup/MAINTAINERS.txt
+   核验快照 https://github.com/18926119195/docuverse/tree/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0
+5. docuverse-kanzheli — 保留 peek 的 OCR 和书内实体对照
+   https://github.com/18926119195/docuverse-kanzheli/blob/codex/repository-cleanup/MAINTAINERS.txt
+   核验快照 https://github.com/18926119195/docuverse-kanzheli/tree/040a9bb1a82cbdd408893510e937afcf157df931
+6. docuverse-shanchule-peek — 无 peek 自动流与名词表实验
+   https://github.com/18926119195/docuverse-shanchule-peek/blob/codex/repository-cleanup/MAINTAINERS.txt
+   核验快照 https://github.com/18926119195/docuverse-shanchule-peek/tree/b85b8399f8a23fc57b66a02d5c4ab3023ffba364
+
+版本关系与证据
+1. hypertext-interact → diergbanben- 是 Git 直接父子。08a712e 的父提交是 d4c188a。A/B 入口也可在后者 App 中核对。
+   https://github.com/18926119195/diergbanben-/commit/08a712e2002f1368a883009eb104ee3ad2e4cd79
+2. fanout 是聊天明确的旁路方向，Git 首提交 9a94415 无父提交。仓库之间有相同资源与源码，但保持各自历史。fanout 后来移除其 A/B 的提交为 534af6b。
+   https://github.com/18926119195/diergbanben-fanout/blob/b5495d32fd083acae9f239e694e7a585723911d0/chat%20history#L747-L759
+   https://github.com/18926119195/diergbanben-fanout/commit/9a94415ea976c2eb3b9afff334456bf84fc65bc0
+   https://github.com/18926119195/diergbanben-fanout/commit/534af6b7950cbff2084cf48eb62733b351291175
+3. 9 月用 docuverse 追台账与监督，用 kanzheli 追 OCR、bookKey 和 peek，用 shanchule-peek 追 no-peek 与 S₁。这三个九月快照讨论的工程问题有承接，但单靠源码相似或聊天日期不能证明 Git 传承。kanzheli 自带 no-peek 实验分支 42ea3d0。shanchule-peek 的默认实验 b85b839 与 shanchule-peek 的 main 根提交 1a8dcdf 共享 Git 树；该库的 main 也走 no-peek 自动流。需要有 peek 的对照时取 kanzheli main 的固定 SHA。
+   https://github.com/18926119195/docuverse-kanzheli/commit/42ea3d012f2aa68c1ac3a145792d653beb0cc144
+   https://github.com/18926119195/docuverse-shanchule-peek/commit/1a8dcdfef3ecd88ee05e524b74a3b39fe55e1b98
+
+从会话可观察到的开发习惯
+• 先追问身份坐标来自哪里，再讨论哪些计算或文本挂在这个键上。维护时同时记录输入坐标、输出实例键与落账操作，独立验证历史键兼容。
+  https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/docs/chat-archive/2026-09-03-architecture-align.jsonl#L1
+  https://github.com/18926119195/docuverse-kanzheli/blob/040a9bb1a82cbdd408893510e937afcf157df931/docs/chat-archive/2026-09-08-bookkey-emphasize-region-combo.jsonl#L38
+• 把选材和用材料回答分开诊断。模型输出的三态交给台账再决定递送。维护时分别记录语义、检索失败和模型格式问题，并检查正常 UI 入口。
+  https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/docs/chat-archive/2026-09-03-architecture-align.jsonl#L66
+  https://github.com/18926119195/docuverse/blob/9d263db3b875ff4fc6dc3039e5c3415a42eaeca0/docs/chat-archive/2026-09-07-letter-desk-supervise.jsonl#L49
+• 经常用同题、不同路径对照，再决定结构。比如独立索引仍是 fanout 的提议，S₁ 的槽选择经历讨论后改回默写。继续讨论时保留先前判断、用户修正和实际代码位置。
+  https://github.com/18926119195/diergbanben-fanout/blob/b5495d32fd083acae9f239e694e7a585723911d0/chat%20history#L12117
+  https://github.com/18926119195/docuverse-shanchule-peek/blob/b85b8399f8a23fc57b66a02d5c4ab3023ffba364/docs/chat-archive/2026-09-14-book-noun-pipeline-a1-global-44215623.jsonl#L71
+
+协作与文件管理
+1. 先挑仓库和固定提交。PR 写出触发案例、正常入口、模型输入和回包（去凭据）、台账状态、复跑命令及结果。分别标明已运行、源码已接入、模块存在、会话提议。用小提交区分兼容修复与行为实验。
+2. 新逻辑按归属沿用当前目录。UI 入口在 src/ui，PDF/OCR 数据流在 src/data，调度和状态在 src/reasoning，已有纯规则在 src/arch，部署 API 在 api，本地适配在 server。早期三库的这些路径在 docuverse/ 下。移动前核对部署根、动态导入、OCR worker、静态资源 URL 和持久化数据。
+3. 会话原件留在现有 Git 路径。新原件用完整日期、会话 ID 和原格式；保留发言者、行号及时区。案例写原文指针、实现提交、测试与未决条件，避免复制不同版本的原件。改动配置时沿用服务端环境变量，禁止把测试密钥放进聊天归档或源码。
+4. 暂时以本文件作为跨库导航。保留六个运行树各自的部署、提交和聊天源；跨库共用模块一旦有稳定接口及相同夹具，再单独评估提取。当前每库只增加一份维护入口，无目录迁移或运行行为改动。
